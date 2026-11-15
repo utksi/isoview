@@ -139,6 +139,15 @@ for (const len of [8, 7, 12]) {
   const h = new Float64Array([4096, 2, 45200]).buffer;
   ok(isWavecarHeader(h) && !isWavecarHeader(new TextEncoder().encode("Cs2AgInCl6 POSCAR line one....").buffer), "WAVECAR header detection");
 }
+/* A cut-off WAVECAR (spin 2 or later bands missing) is refused when opened, not drawn as NaN */
+{
+  const buf = fs.readFileSync(new URL("../examples/N2.WAVECAR", import.meta.url));
+  const reader = len => async (o, l) => { const b = buf.subarray(Math.min(o, len), Math.min(o + l, len)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); };
+  const full = await Wavecar.open(reader(buf.length));
+  let msg = "";
+  try { await Wavecar.open(reader(Math.floor(buf.length * 0.6))); } catch (e) { msg = e.message; }
+  ok(full.nb > 0 && /incomplete/.test(msg), `WAVECAR: complete file opens (${full.nb} bands), one cut at 60 % is refused ("${msg.slice(0, 40)}...")`);
+}
 
 /* marching cubes: sphere |r| = R in a periodic-free box -> closed mesh, area 4 pi R^2, radial normals */
 {

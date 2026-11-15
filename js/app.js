@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=16";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=16";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=16";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=16";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=16";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=16";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=16";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=16";
-import { measureAll } from "./measure.js?v=16";
-import { GifWriter, buildPalette } from "./gif.js?v=16";
-import * as store from "./store.js?v=16";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=17";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=17";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=17";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=17";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=17";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=17";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=17";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=17";
+import { measureAll } from "./measure.js?v=17";
+import { GifWriter, buildPalette } from "./gif.js?v=17";
+import * as store from "./store.js?v=17";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -105,7 +105,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=16", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=17", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }

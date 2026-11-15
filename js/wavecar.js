@@ -6,6 +6,7 @@
  *   record 1: nk, nbands, ENCUT (eV), lattice a, b, c (Angstrom, 9 values)
  *   record 2 + s nk (nb + 1) + k (nb + 1):        nplw, k (fractional, 3), then (Re eps, Im eps, occ) per band
  *   that record + 1 + b:                          nplw coefficients of band b (0-based)
+ * A complete file holds 2 + nspin nk (nb + 1) records; open() refuses a file that ends before the last one starts.
  * Plane waves: G = n . B (B rows = 2 pi inv(A)^T), kept if |k + G|^2 / C < ENCUT with C = 2 m_e / hbar^2 =
  * 0.262465831 1/(eV A^2); order n3 outermost, n2, n1 innermost, each running 0, 1, ..., +m, -m, ..., -1.
  * Build types, told apart by the stored plane-wave count:
@@ -20,8 +21,8 @@
  * electron over the cell (1/A^3); the signed Gamma-only orbital to int psi^2 dV = 1 (A^-3/2). Only the smooth
  * part of the PAW orbital is available (no augmentation inside the spheres).
  */
-import { fft3, nextPow2 } from "./fft.js?v=16";
-import { det3, inv3 } from "./lattice.js?v=16";
+import { fft3, nextPow2 } from "./fft.js?v=17";
+import { det3, inv3 } from "./lattice.js?v=17";
 
 const C = 0.262465831;
 
@@ -37,6 +38,11 @@ export class Wavecar {
     w.nk = Math.round(h1[0]); w.nb = Math.round(h1[1]); w.encut = h1[2];
     w.lattice = [[h1[3], h1[4], h1[5]], [h1[6], h1[7], h1[8]], [h1[9], h1[10], h1[11]]];
     w.volume = Math.abs(det3(w.lattice));
+    // WHY: a cut-off file (a download that stopped early) reads short past its end, which would give NaN orbitals
+    // for the later spin channel; the last record must exist (it may be shorter than rl, so only its start is tested)
+    const nrec = w.rec(w.nspin - 1, w.nk - 1) + w.nb + 1;
+    if ((await read((nrec - 1) * w.rl, 8)).byteLength < 8)
+      throw new Error(`This WAVECAR is incomplete: it ends before its last band (a complete one has about ${(nrec * w.rl).toLocaleString("en")} bytes). It was probably cut off while downloading or copying.`);
     w.kpts = []; w.nplw = []; w.eig = []; w.occ = [];
     for (let s = 0; s < w.nspin; s++) {
       w.nplw.push([]); w.eig.push([]); w.occ.push([]);
@@ -111,6 +117,7 @@ export class Wavecar {
   async orbital(s, k, b, opts = {}) {
     const np = this.nplw[s][k], bytes = this.tag === 45200 ? 8 : 16;
     const buf = await this.read((this.rec(s, k) + 1 + b) * this.rl, np * bytes);
+    if (buf.byteLength < np * bytes) throw new Error(`band ${b + 1}${this.nspin === 2 ? (s ? " ↓" : " ↑") : ""} lies past the end of the file: the WAVECAR is incomplete`);
     const c = this.tag === 45200 ? new Float32Array(buf) : new Float64Array(buf);
     const type = this.type, gam = type === "gam";
     const mode = gam ? (opts.half === "z" ? "gamz" : "gamx") : "std";
