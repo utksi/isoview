@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=19";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=19";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=19";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=19";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=19";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=19";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=19";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=19";
-import { measureAll } from "./measure.js?v=19";
-import { GifWriter, buildPalette } from "./gif.js?v=19";
-import * as store from "./store.js?v=19";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=20";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=20";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=20";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=20";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=20";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=20";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=20";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=20";
+import { measureAll } from "./measure.js?v=20";
+import { GifWriter, buildPalette } from "./gif.js?v=20";
+import * as store from "./store.js?v=20";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -112,7 +112,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=19", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=20", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -576,7 +576,7 @@ function download(data, name) {
 function derive(kind) {
   const L = activeAtomsLayer();
   if (!L) return toast("Choose a structure layer first.", true);
-  const it = itemOf(L), st = it.structure, tol = Math.max(1e-5, parseFloat($("t-tol").value) || 0.01);
+  const it = itemOf(L), st = it.structure, tol = Math.max(1e-5, parseFloat($("t-tol").value) || 1e-5);
   if (!st.pbc || !st.lattice) return toast("This needs a periodic structure.", true);
   let res;
   try { res = kind === "primitive" ? primitive(st, tol) : conventional(st, tol); }
@@ -793,7 +793,7 @@ function updateSymmetry() {
   symTimer = setTimeout(async () => {
     const chip = $("doc-sg"), L = activeAtomsLayer(), it = L && itemOf(L), st = it && it.structure;
     if (!st || !st.pbc || !st.lattice || !st.species.length || !S.layers.length) { chip.hidden = true; symKey = ""; return; }
-    const tol = Math.max(1e-5, parseFloat($("t-tol").value) || 0.01);
+    const tol = Math.max(1e-5, parseFloat($("t-tol").value) || 1e-5);
     const key = [it.id, st.species.length, it.traj ? frameOf(it) : -1, tol, st.pos[0], st.pos[st.pos.length - 1]].join("|");
     if (key === symKey) return;
     symKey = key;

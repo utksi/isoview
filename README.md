@@ -56,6 +56,8 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
     8-atom cubic cell, also with positional noise below the tolerance (copies are averaged). The conventional cell
     follows the lattice's own symmetry (cubic, tetragonal, hexagonal, rhombohedral as its triple hexagonal cell,
     orthorhombic with the centred face as C, monoclinic, triclinic).
+    The tolerance (± next to the buttons, 1e-5 Å by default) applies to the atom positions and to the cell vectors
+    alike, so a cell 1e-4 off cubic is tetragonal. Raise it (e.g. to 0.01 Å) for noisy structures such as an MD frame.
   - **Export as shown** saves the structure as you see it (shift, deletions and supercell applied) as POSCAR, CIF or
     extended XYZ.
 - **Measure**: click two atoms for their distance, three for the angle at the middle one, four for the dihedral.
@@ -111,7 +113,7 @@ blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
 - Bonds join atoms closer than reach × (R₁ + R₂), with covalent radii from Cordero et al. (2008).
 - The space group next to the file name comes from [moyo](https://github.com/spglib/moyo) (by the spglib
   developers; its WebAssembly build is in `js/vendor/moyo`, MIT or Apache-2.0), at the same tolerance as the cell tools
-  (0.01 Å by default). For a trajectory it is that of the frame shown; molecules without a cell get none.
+  (1e-5 Å by default). For a trajectory it is that of the frame shown; molecules without a cell get none.
 
 ## Develop
 

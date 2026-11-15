@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=19">
+<link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -32,7 +32,7 @@
       <div class="row-btns"><button type="button" id="btn-add" class="ghost">Add files to the scene</button></div>
       <div class="tools" id="tools" hidden>
         <div class="tools-for"><span class="lab">Structure</span><span id="tools-for" class="ell"></span></div>
-        <div class="tool-row" id="row-cells"><button type="button" id="t-prim" title="Find the primitive cell, also from a supercell (added as a new layer)">Primitive cell</button><button type="button" id="t-conv" title="Build the conventional cell, also from a supercell (added as a new layer)">Conventional cell</button><label class="tol" for="t-tol" title="Symmetry tolerance: positions that agree within this distance count as the same site">± <input type="number" id="t-tol" value="0.01" step="0.005" min="0.0001"> Å</label></div>
+        <div class="tool-row" id="row-cells"><button type="button" id="t-prim" title="Find the primitive cell, also from a supercell (added as a new layer)">Primitive cell</button><button type="button" id="t-conv" title="Build the conventional cell, also from a supercell (added as a new layer)">Conventional cell</button><label class="tol" for="t-tol" title="Symmetry tolerance: atom positions and cell vectors that agree within this distance count as the same (1e-5 Å by default; raise it, e.g. to 0.01, for noisy or MD structures)">± <input type="number" id="t-tol" value="0.00001" step="0.00001" min="0.00001"> Å</label></div>
         <div class="export">
           <div class="exp-h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Export as shown</span><em>shift, deletions and repeat applied</em></div>
           <div class="tool-row"><button type="button" data-fmt="poscar">POSCAR</button><button type="button" data-fmt="cif">CIF</button><button type="button" data-fmt="xyz">XYZ</button></div>
@@ -184,6 +184,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=19"></script>
+<script type="module" src="js/app.js?v=20"></script>
 </body>
 </html>

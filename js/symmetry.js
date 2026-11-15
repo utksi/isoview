@@ -11,7 +11,8 @@
  * not in their plane; in three dimensions these always form a basis. Made right-handed and checked to generate every
  * accepted translation (within tol); the number of lattice points in the original cell is n = V / |det B|.
  * Lattice point group: integer matrices M (entries -1, 0, 1, det +-1) with M G M^T = G, G = B B^T the metric of the
- * reduced primitive basis B, to a relative tolerance of 1e-3 (5e-3 of the squared length scale). Its order fixes the
+ * reduced primitive basis B, within |(M G M^T - G)_ij| <= tol (|b_i| + |b_j|): the image vectors agree with the basis
+ * in length to tol (A), the same tolerance as the atoms (for i = j, |b'|^2 - |b|^2 ~ 2 |b| (|b'| - |b|)). Its order fixes the
  * holohedry: 48 cubic, 24 hexagonal, 16 tetragonal, 12 rhombohedral, 8 orthorhombic, 4 monoclinic, 2 triclinic.
  * The Cartesian rotation of M is Q = B^T M^T B^-T; its proper part det(M) Q has trace 1 + 2 cos(theta), and its
  * axis is the shortest lattice vector along the rotation axis.
@@ -24,7 +25,7 @@
  * The result is the conventional cell of the lattice's own symmetry; for a structure whose atoms break the lattice
  * symmetry it is a valid cell of the crystal but not necessarily the standard setting of its space group.
  */
-import { inv3, det3, cartToFrac, fracToCart, norm, cross, dot } from "./lattice.js?v=19";
+import { inv3, det3, cartToFrac, fracToCart, norm, cross, dot } from "./lattice.js?v=20";
 
 const wrap1 = x => { const y = x - Math.floor(x); return y >= 1 - 1e-12 ? 0 : y; };
 
@@ -58,7 +59,7 @@ function fracHash(L, F, species, tol) {
 
 /** Fractional translations (including 0) that map the structure onto itself within tol (A), each refined to the
  *  mean over all matched atoms. */
-export function translations(st, tol = 0.01) {
+export function translations(st, tol = 1e-5) {
   const F = fracsOf(st), sp = st.species, near = fracHash(st.lattice, F, sp, tol);
   const count = new Map();
   for (const s of sp) count.set(s, (count.get(s) || 0) + 1);
@@ -126,7 +127,7 @@ function refill(st, C, extraT, tol, wrapAll = false) {
 }
 
 /** Primitive cell: { structure, n } with n the number of lattice points in the original cell (1 = already primitive). */
-export function primitive(st, tol = 0.01) {
+export function primitive(st, tol = 1e-5) {
   if (!st.pbc || !st.lattice) throw new Error("finding a primitive cell needs a periodic structure");
   const T = translations(st, tol), V = Math.abs(det3(st.lattice));
   const B = reducedBasis(st.lattice, T, tol);
@@ -134,9 +135,11 @@ export function primitive(st, tol = 0.01) {
   return { structure, n: Math.round(V / Math.abs(det3(B))) };
 }
 
-/** Lattice point group of the basis B (rows): integer 3x3 matrices M with M G M^T = G. */
-export function pointGroup(B, rel = 1e-3) {
-  const G = B.map(u => B.map(v => dot(u, v))), sc = Math.max(G[0][0], G[1][1], G[2][2]), ops = [];
+/** Lattice point group of the basis B (rows, A): integer 3x3 matrices M with |(M G M^T - G)_ij| <= tol (|b_i| + |b_j|),
+ *  G = B B^T, tol in A. */
+export function pointGroup(B, tol = 1e-5) {
+  // WHY: a fixed relative tolerance (formerly 5e-3 of |b|^2) called a 1e-3 tetragonal strain cubic at any atom tolerance
+  const G = B.map(u => B.map(v => dot(u, v))), len = B.map(norm), ops = [];
   const r = [-1, 0, 1];
   for (const a of r) for (const b of r) for (const c of r) for (const d of r) for (const e of r) for (const f of r) for (const g of r) for (const h of r) for (const k of r) {
     const M = [[a, b, c], [d, e, f], [g, h, k]], D = det3(M);
@@ -145,7 +148,7 @@ export function pointGroup(B, rel = 1e-3) {
     for (let i = 0; i < 3 && okM; i++) for (let j = 0; j < 3 && okM; j++) {
       let s = 0;
       for (let p = 0; p < 3; p++) for (let q = 0; q < 3; q++) s += M[i][p] * G[p][q] * M[j][q];
-      if (Math.abs(s - G[i][j]) > 5 * rel * sc) okM = false;
+      if (Math.abs(s - G[i][j]) > tol * (len[i] + len[j])) okM = false;
     }
     if (okM) ops.push(M);
   }
@@ -194,7 +197,7 @@ const rightHanded = C => (det3(C) < 0 ? [C[0], C[1], C[2].map(x => -x)] : C);
  * a vector: equal volume (relative 1e-4), equal sorted lengths (within tol, A) and equal sorted angles taken as
  * min(theta, 180 - theta) (within 0.05 degrees). Used to tell that a cell already is the conventional one.
  */
-export function sameCellShape(a, b, tol = 0.01) {
+export function sameCellShape(a, b, tol = 1e-5) {
   if (!a.lattice || !b.lattice || a.species.length !== b.species.length) return false;
   const pa = cellParams(a.lattice), pb = cellParams(b.lattice);
   const va = Math.abs(det3(a.lattice)), vb = Math.abs(det3(b.lattice));
@@ -206,10 +209,10 @@ function cellParams(L) {
 }
 
 /** Conventional cell: { structure, system, z } (z = conventional / primitive volume). */
-export function conventional(st, tol = 0.01) {
+export function conventional(st, tol = 1e-5) {
   const prim = primitive(st, tol).structure;
   const B = reducedBasis(prim.lattice, [[0, 0, 0]], tol);
-  const ops = pointGroup(B), ax = axes(B, ops), n = ops.length;
+  const ops = pointGroup(B, tol), ax = axes(B, ops), n = ops.length;
   const of = k => ax.filter(a => a.order === k);
   const perp = (list, c) => list.filter(a => Math.abs(dot(a.axis, unit(c))) < 1e-3);
   let C, system;

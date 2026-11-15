@@ -295,6 +295,18 @@ for (const len of [8, 7, 12]) {
   // noise beyond the tolerance: no translation is accepted, the cell is reported as it is (no error)
   const loose = sc(nacl, 3, 0.004), lp = primitive(loose, 0.005);
   ok(lp.n === 1 && lp.structure.species.length === 216, "noise beyond the tolerance: the supercell is kept as it is, without an error");
+  // rock salt stretched along c by 1e-4 (c - a = 5.6e-4 A): body-centred tetragonal, I4/mmm (139), at the default
+  // tolerance of the page; a tolerance above 5.6e-4 A merges it back into the cubic Fm-3m (225)
+  const tolDefault = +fs.readFileSync(new URL("../index.html", import.meta.url), "utf8").match(/id="t-tol"[^>]*value="([^"]+)"/)[1];
+  ok(tolDefault === 1e-5, `default symmetry tolerance of the page: 1e-5 A (got ${tolDefault})`);
+  const tet = { ...nacl, lattice: [[5.64, 0, 0], [0, 5.64, 0], [0, 0, 5.64 * 1.0001]], pos: nacl.pos.map((x, i) => (i % 3 === 2 ? x * 1.0001 : x)) };
+  const sgOf = async (st, symprec) => (await handle({ op: "symmetry", lattice: st.lattice, symprec, numbers: st.species.map(x => SYMBOLS.indexOf(x)),
+    frac: st.species.map((_, i) => cartToFrac(inv3(st.lattice), [st.pos[3 * i], st.pos[3 * i + 1], st.pos[3 * i + 2]])) })).result.number;
+  const [g5, g2] = [await sgOf(tet, tolDefault), await sgOf(tet, 0.01)];
+  ok(g5 === 139 && g2 === 225, `rock salt with c/a = 1.0001: space group ${g5} at ${tolDefault} A (139 expected), ${g2} at 0.01 A (225 expected)`);
+  const ct5 = conventional(tet, tolDefault), ct2 = conventional(tet, 0.01);
+  ok(ct5.system === "tetragonal" && ct5.structure.species.length === 4 && ct2.system === "cubic" && ct2.structure.species.length === 8,
+    `rock salt with c/a = 1.0001: conventional ${ct5.system} (${ct5.structure.species.length} atoms) at ${tolDefault} A, tetragonal I cell of 4 expected; ${ct2.system} (${ct2.structure.species.length}) at 0.01 A, cubic 8 expected`);
 
 }
 /* export as shown: shift and supercell applied, CIF and XYZ read back */
