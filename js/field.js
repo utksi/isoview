@@ -19,8 +19,14 @@
  * The polygon is rasterised once on a 384 x 384 grid over its bounding box (even-odd rule), so each point costs one
  * lookup.
  * Output order: x index fastest (I + mx (J + my K)), as read by the marching cubes (gfx/mc.js).
+ * Refinement (refine): coarse grids are resampled onto m_a times finer grids, so isosurfaces are smooth. Periodic grids
+ * use Fourier interpolation, exact for band-limited data such as plane-wave densities and potentials: along each axis
+ * the line is transformed, its spectrum padded with zeros from n to m n points (an even n's Nyquist term split in half
+ * between +n/2 and -n/2) and transformed back, which keeps the original points and the mean (so the integral). General
+ * grids use cubic Catmull-Rom interpolation along each axis, (n - 1) m + 1 points.
  */
-import { det3 } from "./lattice.js";
+import { det3 } from "./lattice.js?v=10";
+import { fft1 } from "./fft.js?v=10";
 
 /** Field statistics: min, max, maxAbs, integral, the sorted |f| sample and its suffix sums. */
 export function stats(f) {
@@ -132,4 +138,71 @@ function maskCuts(out, m, vox, o, cutList) {
       }
     }
   }
+}
+
+/**
+ * A finer copy of a coarse field (see the file header): the factor m_a per axis is the smallest integer giving a grid
+ * step <= h (A), reduced on the axis with the largest factor until the grid has at most maxPts points. Returns the
+ * field itself when no axis needs refining; otherwise a new field with data, n, n0 (the grid as read) and refined = [m_a].
+ */
+export function refine(f, h = 0.1, maxPts = 4e6) {
+  const per = f.periodic && !f.closed, n = f.n;
+  const len = v => Math.hypot(v[0], v[1], v[2]);
+  const m = n.map((na, a) => (na < 2 ? 1 : Math.max(1, Math.ceil(len(f.span[a]) / (per ? na : na - 1) / h - 1e-9))));
+  const size = mm => n.reduce((acc, na, a) => acc * (per ? na * mm[a] : (na - 1) * mm[a] + 1), 1);
+  while (size(m) > maxPts && m.some(x => x > 1)) m[m.indexOf(Math.max(...m))]--;
+  if (m.every(x => x === 1)) return f;
+  let data = f.data, cur = n.slice();
+  for (let a = 0; a < 3; a++) {
+    if (m[a] === 1) continue;
+    const r = per ? fourierAxis(data, cur, a, m[a]) : cubicAxis(data, cur, a, m[a]);
+    data = r.data; cur = r.n;
+  }
+  return { ...f, data, n: cur, n0: n.slice(), refined: m };
+}
+
+/** Lines along axis a of a grid of shape n (x fastest): fn(base, p, q) with base the index of the line's first point
+ *  and p, q its indices along the other two axes (in increasing axis order). */
+function eachLine(n, a, fn) {
+  const st = [1, n[0], n[0] * n[1]], o = [0, 1, 2].filter(b => b !== a);
+  for (let q = 0; q < n[o[1]]; q++) for (let p = 0; p < n[o[0]]; p++) fn(p * st[o[0]] + q * st[o[1]], p, q);
+}
+
+/** Fourier interpolation of every line along axis a of a periodic grid from n_a to m n_a points. */
+function fourierAxis(data, n, a, m) {
+  const na = n[a], M = na * m, out = n.slice(); out[a] = M;
+  const res = new Float32Array(data.length / na * M), re = new Float64Array(na), im = new Float64Array(na);
+  const R = new Float64Array(M), I = new Float64Array(M), half = Math.floor(na / 2);
+  const ost = [1, out[0], out[0] * out[1]], o = [0, 1, 2].filter(b => b !== a);
+  const stride = [1, n[0], n[0] * n[1]][a];
+  eachLine(n, a, (base, p, q) => {
+    for (let k = 0; k < na; k++) { re[k] = data[base + k * stride]; im[k] = 0; }
+    fft1(re, im, -1);
+    R.fill(0); I.fill(0);
+    for (let k = 0; k <= half; k++) { R[k] = re[k]; I[k] = im[k]; }
+    for (let k = half + 1; k < na; k++) { R[M - na + k] = re[k]; I[M - na + k] = im[k]; }
+    if (na % 2 === 0) { R[half] *= 0.5; I[half] *= 0.5; R[M - half] = R[half]; I[M - half] = I[half]; }
+    fft1(R, I, 1);
+    const ob = p * ost[o[0]] + q * ost[o[1]];
+    for (let l = 0; l < M; l++) res[ob + l * ost[a]] = R[l] / na;
+  });
+  return { data: res, n: out };
+}
+
+/** Catmull-Rom interpolation of every line along axis a of a general grid from n_a to (n_a - 1) m + 1 points. */
+function cubicAxis(data, n, a, m) {
+  const na = n[a], M = (na - 1) * m + 1, out = n.slice(); out[a] = M;
+  const res = new Float32Array(data.length / na * M), x = new Float64Array(na);
+  const ost = [1, out[0], out[0] * out[1]], o = [0, 1, 2].filter(b => b !== a);
+  const stride = [1, n[0], n[0] * n[1]][a];
+  eachLine(n, a, (base, p, q) => {
+    for (let k = 0; k < na; k++) x[k] = data[base + k * stride];
+    const ob = p * ost[o[0]] + q * ost[o[1]];
+    for (let l = 0; l < M; l++) {
+      const i = Math.min(Math.floor(l / m), na - 2), u = l / m - i;
+      const p0 = x[Math.max(i - 1, 0)], p1 = x[i], p2 = x[i + 1], p3 = x[Math.min(i + 2, na - 1)];
+      res[ob + l * ost[a]] = 0.5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u * u + (3 * p1 - p0 - 3 * p2 + p3) * u * u * u);
+    }
+  });
+  return { data: res, n: out };
 }

@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=9">
+<link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -45,10 +45,10 @@
         <button type="button" id="e-region" aria-pressed="false" title="While on, a plain drag draws a region (Shift + drag always does)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.2 15.4C3.4 12.6 4.6 7.6 9.4 6.1c4.6-1.5 10.4.4 10.2 4.6-.2 4-5.6 5.4-9.4 4.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-dasharray="3 2.4"/><path d="M8.6 16.3c-1.6 1-1.6 3-.2 3.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Draw a region</button>
         <button type="button" id="e-delete" class="warn" disabled title="Delete the selected atoms, in every periodic image (Del)">Delete atoms</button>
         <button type="button" id="e-cut" class="warn" disabled hidden title="Remove the part of the surfaces inside the drawn region">Cut surface</button>
-        <button type="button" id="e-center" disabled hidden title="Shift the origin so that the selected atom sits at the centre of the cell">Center on atom</button>
+        <button type="button" id="e-center" disabled title="Shift atoms and fields so that the selected atom sits at the centre of the cell">Center on atom</button>
       </div>
       <div class="row" id="row-cuts" hidden><span class="lab" id="cuts-n"></span><button type="button" id="cuts-clear" class="ghost">Restore the surface</button></div>
-      <div class="row col pbc"><div class="lv"><span class="lab">Shift origin</span><span class="note-r">fractions of a, b, c</span></div><div class="reps shift"><input type="number" id="fx" step="0.05" value="0" aria-label="shift along a (fraction)"><input type="number" id="fy" step="0.05" value="0" aria-label="shift along b (fraction)"><input type="number" id="fz" step="0.05" value="0" aria-label="shift along c (fraction)"><button type="button" id="shift-reset" class="mini" title="No shift">0</button></div></div>
+      <div class="row col"><div class="lv"><span class="lab">Shift origin</span><span class="note-r" id="shift-unit">fractions of a, b, c</span></div><div class="reps shift"><input type="number" id="fx" step="0.05" value="0" aria-label="shift along a (fraction)"><input type="number" id="fy" step="0.05" value="0" aria-label="shift along b (fraction)"><input type="number" id="fz" step="0.05" value="0" aria-label="shift along c (fraction)"><button type="button" id="shift-reset" class="mini" title="No shift">0</button></div></div>
       <div class="tool-row pad"><button type="button" id="e-undo" disabled title="Undo (⌘/Ctrl Z)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4.5 9.5 9 5M5 9.5h9a5.5 5.5 0 0 1 0 11h-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="e-undo-t">Nothing to undo</span></button></div>
     </div>
   </details>
@@ -61,7 +61,7 @@
       <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
       <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output></div></div>
-      <div class="row pbc"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
+      <div class="row has-cell"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
       <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
       <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
     </div>
@@ -167,8 +167,6 @@
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <input type="file" id="file" multiple hidden>
 
-<!-- WHY: every module carries the version, so a cached older module is never mixed with a newer one after a deploy -->
-<script type="importmap">{"imports":{"./js/app.js":"./js/app.js?v=9","./js/elements.js":"./js/elements.js?v=9","./js/fft.js":"./js/fft.js?v=9","./js/field.js":"./js/field.js?v=9","./js/formats.js":"./js/formats.js?v=9","./js/gfx/camera.js":"./js/gfx/camera.js?v=9","./js/gfx/labels.js":"./js/gfx/labels.js?v=9","./js/gfx/mc.js":"./js/gfx/mc.js?v=9","./js/gfx/mctables.js":"./js/gfx/mctables.js?v=9","./js/gfx/renderer.js":"./js/gfx/renderer.js?v=9","./js/gfx/shaders.js":"./js/gfx/shaders.js?v=9","./js/gfx/webgl2.js":"./js/gfx/webgl2.js?v=9","./js/gfx/webgpu.js":"./js/gfx/webgpu.js?v=9","./js/gif.js":"./js/gif.js?v=9","./js/lattice.js":"./js/lattice.js?v=9","./js/measure.js":"./js/measure.js?v=9","./js/numbers.js":"./js/numbers.js?v=9","./js/store.js":"./js/store.js?v=9","./js/structure.js":"./js/structure.js?v=9","./js/symmetry.js":"./js/symmetry.js?v=9","./js/traj.js":"./js/traj.js?v=9","./js/wavecar.js":"./js/wavecar.js?v=9","./js/worker.js":"./js/worker.js?v=9"}}</script>
-<script type="module" src="js/app.js?v=9"></script>
+<script type="module" src="js/app.js?v=10"></script>
 </body>
 </html>

@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js";
-import { primitive, conventional, sameCellShape } from "./symmetry.js";
-import { colorOf, rcov, SPACERS } from "./elements.js";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js";
-import { buildAtlas, packLabels } from "./gfx/labels.js";
-import { measureAll } from "./measure.js";
-import { GifWriter, buildPalette } from "./gif.js";
-import * as store from "./store.js";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=10";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=10";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=10";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=10";
+import { colorOf, rcov, SPACERS } from "./elements.js?v=10";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=10";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=10";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=10";
+import { measureAll } from "./measure.js?v=10";
+import { GifWriter, buildPalette } from "./gif.js?v=10";
+import * as store from "./store.js?v=10";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -84,12 +84,14 @@ const fieldLayers = (vis = false) => S.layers.filter(l => l.kind === "field" && 
 const activeField = () => S.layers.find(l => l.id === S.active && l.kind === "field") || null;
 const cellOf = it => (it.structure && it.structure.lattice) || (it.wave && it.wave.lattice) || null;
 const pbcOf = it => (it.structure ? it.structure.pbc : !!it.wave);
+/** Corner of an item's cell: 0 for crystals, the grid origin for a non-periodic box (cube files, molecules in a box). */
+const originOf = it => (it.structure && it.structure.origin) || [0, 0, 0];
 /** Cell of the first visible layer that has one (else of any layer): reference for views and for the shift fractions. */
 const primaryCell = () => {
   for (const vis of [true, false]) for (const L of S.layers) {
     if (vis && !L.visible) continue;
     const it = itemOf(L), c = cellOf(it);
-    if (c) return { L: c, pbc: pbcOf(it) };
+    if (c) return { L: c, pbc: pbcOf(it), o: originOf(it) };
   }
   return null;
 };
@@ -102,7 +104,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js" + new URL(import.meta.url).search, import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=10", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -179,7 +181,7 @@ function buildStructure() {
   const atoms = [], bonds = [], segs = [];
   if (S.style !== "off") for (const L of atomLayers()) {
     const st = itemOf(L).structure, reps = st.pbc ? S.reps : [1, 1, 1];
-    const da = displayAtoms(st, { reps, boundary: S.boundary && st.pbc, shift: fracShift(st.lattice) });
+    const da = displayAtoms(st, { reps, boundary: S.boundary && st.pbc, shift: fracShift(st.lattice), cart: S.t });
     for (const a of da) { a.layer = L.id; a.r = radiusOf(a.el); a.color = colorOf(a.el); }
     if (S.bonds && S.style !== "space") {
       const br = (S.style === "stick" ? 0.14 : 0.1) * S.scale;
@@ -194,13 +196,13 @@ function buildStructure() {
     const cells = [];
     for (const L of S.layers) {
       if (!L.visible) continue;
-      const it = itemOf(L), C = cellOf(it);
-      if (C && !cells.some(c => sameCell(c.L, C))) cells.push({ L: C, pbc: pbcOf(it) });
+      const it = itemOf(L), C = cellOf(it), o = originOf(it);
+      if (C && !cells.some(c => sameCell(c.L, C) && c.o.every((x, k) => Math.abs(x - o[k]) < 1e-3))) cells.push({ L: C, pbc: pbcOf(it), o });
     }
-    for (const { L, pbc } of cells) {
+    for (const { L, pbc, o } of cells) {
       const reps = pbc ? S.reps : [1, 1, 1];
       const box = (A, B, Cc, dashed) => {
-        const P = (i, j, k) => [0, 1, 2].map(c => i * A[c] + j * B[c] + k * Cc[c]);
+        const P = (i, j, k) => [0, 1, 2].map(c => o[c] + i * A[c] + j * B[c] + k * Cc[c]);
         const E = [[0, 0, 0, 1, 0, 0], [0, 1, 0, 1, 1, 0], [0, 0, 1, 1, 0, 1], [0, 1, 1, 1, 1, 1], [0, 0, 0, 0, 1, 0], [1, 0, 0, 1, 1, 0],
           [0, 0, 1, 0, 1, 1], [1, 0, 1, 1, 1, 1], [0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 1], [0, 1, 0, 0, 1, 1], [1, 1, 0, 1, 1, 1]];
         for (const e of E) segs.push({ p0: P(e[0], e[1], e[2]), p1: P(e[3], e[4], e[5]), dashed });
@@ -272,7 +274,8 @@ function sceneSphere() {
     const it = itemOf(L), C = cellOf(it);
     if (!C || (!S.cell && disp.atoms.length)) continue;
     const r = pbcOf(it) ? S.reps : [1, 1, 1];
-    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) add([0, 1, 2].map(c => i * r[0] * C[0][c] + j * r[1] * C[1][c] + k * r[2] * C[2][c]));
+    const o = originOf(it);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) add([0, 1, 2].map(c => o[c] + i * r[0] * C[0][c] + j * r[1] * C[1][c] + k * r[2] * C[2][c]));
   }
   if (!Number.isFinite(lo[0])) return { c: [0, 0, 0], r: 5 };
   return { c: lo.map((v, i) => (v + hi[i]) / 2), r: Math.max(1, 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])) };
@@ -391,7 +394,8 @@ function updateEdit() {
   $("e-delete").disabled = !n;
   $("e-delete").textContent = n ? `Delete ${n} atom${s}` : "Delete atoms";
   $("e-cut").hidden = !fieldLayers(true).length; $("e-cut").disabled = !S.region;
-  $("e-center").hidden = !pc; $("e-center").disabled = n !== 1;
+  $("e-center").disabled = n !== 1;
+  $("e-center").title = pc ? "Shift atoms and fields so that the selected atom sits at the centre of the cell" : "Turn the view about the selected atom";
   const cuts = Math.max(0, ...fieldLayers().map(L => L.cuts.length)), cs = cuts > 1 ? "s" : "";
   $("row-cuts").hidden = !cuts;
   $("cuts-n").textContent = `${cuts} cut${cs}`;
@@ -452,10 +456,14 @@ function cutSurface() {
   S.sel = []; S.region = null; uploadAtoms(); updateSelectionBar();
   toast("Cut the selected region out of the surface.", false, 6000, { label: "Undo", fn: undo });
 }
+/** Center on the selected atom: with a cell, shift so that it sits at the centre of its cell (periodic cells wrap the
+ *  shift into (-1/2, 1/2]); without any cell, make it the point the view turns about. */
 function centerOnSelected() {
-  const s = S.sel[0], it = itemOf(layerById(s.layer)), C = cellOf(it) || (primaryCell() || {}).L;
-  if (!C) return;
-  const mid = [0, 1, 2].map(c => 0.5 * (C[0][c] + C[1][c] + C[2][c]));
+  const s = S.sel[0];
+  if (!s) return;
+  const it = itemOf(layerById(s.layer)), own = cellOf(it), pc = primaryCell(), C = own || (pc && pc.L), o = own ? originOf(it) : pc ? pc.o : null;
+  if (!C) { cam.target = s.p.slice(); requestRender(); toast(`The view now turns about ${atomLabel(s)}.`, false, 3000); return; }
+  const mid = [0, 1, 2].map(c => o[c] + 0.5 * (C[0][c] + C[1][c] + C[2][c]));
   setShift(wrapShift(S.t.map((v, c) => v + mid[c] - s.p[c])));
 }
 /** A translation reduced to fractions in (-0.5, 0.5] of the main cell (shifts are periodic). */
@@ -475,7 +483,12 @@ function setShift(t, record = true) {
   syncShiftInputs();
   buildStructure(); refreshSurfaces(); summaries(); updateEdit();
 }
-function syncShiftInputs() { const pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0]; ["fx", "fy", "fz"].forEach((id, a) => ($(id).value = +f[a].toFixed(4))); }
+/** Shift inputs: fractions of the main cell's a, b, c, or Angstrom along x, y, z when nothing has a cell. */
+function syncShiftInputs() {
+  const pc = primaryCell(), f = pc ? fracShift(pc.L) : S.t;
+  ["fx", "fy", "fz"].forEach((id, a) => { $(id).value = +f[a].toFixed(4); $(id).step = pc ? "0.05" : "0.5"; $(id).setAttribute("aria-label", pc ? `shift along ${"abc"[a]} (fraction)` : `shift along ${"xyz"[a]} (A)`); });
+  $("shift-unit").textContent = pc ? (pc.pbc ? "fractions of a, b, c" : "fractions of the box a, b, c") : "Å along x, y, z";
+}
 /** Record an undoable change; u.label names it in the Edit panel ("Undo: delete 3 atoms"). */
 function pushUndo(u) { S.undo.push(u); if (S.undo.length > 50) S.undo.shift(); updateEdit(); }
 function undo() {
@@ -844,7 +857,8 @@ function levelHint() {
   const I = st.integral, fi = Math.abs(I) >= 100 ? I.toFixed(2) : +I.toPrecision(5) + "";
   const m = L.mesh, ord = n => n + (["th", "st", "nd", "rd"][n] || "th");
   const tri = m ? ` · ${m.tris >= 1e6 ? (m.tris / 1e6).toFixed(2) + "M" : Math.round(m.tris / 1e3) + "k"} triangles${m.stride > 1 ? ` (every ${ord(m.stride)} point)` : ""}${m.truncated ? ", truncated" : ""}` : "";
-  $("stats").textContent = `${f.n.join(" × ")} grid · min ${fmt(st.min)} · max ${fmt(st.max)} · ∫ ${fi}${f.unit === "e/Å³" ? " e" : ""}${tri}`;
+  const fine = f.n0 && f.n0.some((x, a) => x !== f.n[a]) ? ` (drawn on ${f.n.join(" × ")})` : "";
+  $("stats").textContent = `${(f.n0 || f.n).join(" × ")} grid${fine} · min ${fmt(st.min)} · max ${fmt(st.max)} · ∫ ${fi}${f.unit === "e/Å³" ? " e" : ""}${tri}`;
 }
 function setLevelFromSlider(preview) {
   const L = activeField(), f = activeStats();
@@ -1154,6 +1168,8 @@ function updateChrome() {
   for (const b of document.querySelectorAll(".corner-eye")) b.hidden = !has;
   const pc = primaryCell();
   for (const el of document.querySelectorAll(".pbc")) el.hidden = !(pc && pc.pbc);
+  for (const el of document.querySelectorAll(".has-cell")) el.hidden = !pc;
+  syncShiftInputs();
   for (const b of document.querySelectorAll("[data-along]")) b.hidden = !pc;
   const names = [...new Set(S.layers.map(L => itemOf(L).name))];
   $("doc-name").textContent = names.join(" + ");
@@ -1293,7 +1309,8 @@ for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("chan
 });
 for (const [i, id] of ["fx", "fy", "fz"].entries()) $(id).addEventListener("change", e => {
   const pc = primaryCell(), v = parseFloat(e.target.value);
-  if (!pc || !Number.isFinite(v)) { syncShiftInputs(); return; }
+  if (!Number.isFinite(v)) { syncShiftInputs(); return; }
+  if (!pc) { const t = S.t.slice(); t[i] = v; setShift(t); return; }
   const f = fracShift(pc.L); f[i] = v; setShift(fracToCart(pc.L, f));
 });
 $("shift-reset").addEventListener("click", () => setShift([0, 0, 0]));

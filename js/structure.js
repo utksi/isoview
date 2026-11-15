@@ -1,8 +1,9 @@
 /**
  * Atoms to draw and the bonds between them.
  *
- * Origin shift: fractional coordinates f -> f + shift before wrapping (periodic), or r -> r + shift . L (non-periodic
- * with a box); the same shift moves the fields (field.js), so atoms and densities stay together.
+ * Origin shift: fractional coordinates f -> f + shift before wrapping (periodic), r -> r + shift . L (non-periodic
+ * with a box) or r -> r + cart (no cell, Angstrom); the same shift moves the fields (field.js), so atoms and densities
+ * stay together.
  * Periodic structures: fractional coordinates are wrapped into [0, 1) (values within eps of 1 map to 0), repeated
  * over the r_a x r_b x r_c supercell, and, with boundary atoms on, atoms on a cell face (fractional coordinate below
  * eps along an axis) are also drawn on the opposite face of the supercell (edges and corners by combination).
@@ -11,14 +12,14 @@
  * themselves (Cs in Cs2AgInCl6, Li in LiFePO4), and kept when they do not (NaCl, CaF2, Li2O would otherwise show no
  * bonds at all). Neighbours are found with a cubic cell list of edge = the largest cutoff.
  */
-import { inv3, cartToFrac, fracToCart, det3 } from "./lattice.js";
-import { rcov } from "./elements.js";
+import { inv3, cartToFrac, fracToCart, det3 } from "./lattice.js?v=10";
+import { rcov } from "./elements.js?v=10";
 
 /** List of { el, x, y, z, src } with src the index of the atom in the structure. */
-export function displayAtoms(st, { reps = [1, 1, 1], boundary = true, eps = 1e-3, shift = [0, 0, 0] } = {}) {
+export function displayAtoms(st, { reps = [1, 1, 1], boundary = true, eps = 1e-3, shift = [0, 0, 0], cart = [0, 0, 0] } = {}) {
   const out = [], N = st.species.length, P = st.pos;
   if (!st.pbc || !st.lattice) {
-    const d = st.lattice ? fracToCart(st.lattice, shift) : [0, 0, 0];
+    const d = st.lattice ? fracToCart(st.lattice, shift) : cart;
     for (let i = 0; i < N; i++) out.push({ el: st.species[i], x: P[3 * i] + d[0], y: P[3 * i + 1] + d[1], z: P[3 * i + 2] + d[2], src: i });
     return out;
   }
@@ -118,12 +119,14 @@ export function toPOSCAR(st, shift = [0, 0, 0], title = "isoview") {
 
 /**
  * The structure as shown, for export: atoms translated by the Cartesian vector t, wrapped into the cell (periodic)
- * and repeated over the reps supercell (lattice rows scaled by reps); boundary duplicates are not included.
+ * and repeated over the reps supercell (lattice rows scaled by reps); boundary duplicates are not included. A
+ * non-periodic box is moved to start at 0 (positions taken relative to its origin).
  */
 export function shownStructure(st, t = [0, 0, 0], reps = [1, 1, 1]) {
   if (!st.pbc || !st.lattice) {
-    const pos = Float64Array.from(st.pos, (x, k) => x + t[k % 3]);
-    return { ...st, pos };
+    // a non-periodic box is written from 0: positions relative to its corner
+    const o = st.origin || [0, 0, 0], pos = Float64Array.from(st.pos, (x, k) => x + t[k % 3] - (st.lattice ? o[k % 3] : 0));
+    return { ...st, pos, origin: undefined };
   }
   const L = st.lattice, Li = inv3(L), species = [], pos = [];
   for (let i = 0; i < st.species.length; i++) {

@@ -24,9 +24,13 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 
 ## Using it
 
-- **Structure**: ball-and-stick, space filling or sticks; bond reach; supercell repeat; atoms on cell faces.
+- **Structure**: ball-and-stick, space filling or sticks; bond reach; supercell repeat; atoms on cell faces; the cell
+  or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
-- **Surface**: the level slider is logarithmic for densities and orbitals and linear for potentials and ELF.
+- **Surface**: coarse grids are drawn on a finer grid so surfaces are smooth (a step of at most 0.1 Å, up to 4 M
+  points): periodic data by Fourier interpolation, which is exact for plane-wave densities and potentials and keeps
+  the integral; other grids (cube) by cubic interpolation. WAVECAR orbitals are built on a larger FFT box, which is
+  exact. The stats line gives the grid as read and the one drawn. The level slider is logarithmic for densities and orbitals and linear for potentials and ELF.
   The readout gives the share of the charge (or of ∫|f| for signed fields) inside the surface.
   Signed fields show a positive and a negative surface.
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
@@ -47,9 +51,10 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 - **Edit** (its own panel): draw a region around atoms with Shift + drag (or switch on "Draw a region"); the region
   is freehand, not a box. Delete removes the selected atoms in every periodic image; Cut surface removes the
   isosurface inside the region (the region stays fixed as you rotate), and Restore the surface brings it back.
-  **Shift origin** moves atoms and fields together by fractions of a, b, c; periodic fields (CHGCAR, WAVECAR,
-  periodic XSF) shift exactly, by whole grid steps plus a sub-step origin offset. Center on atom puts one selected
-  atom in the middle of the cell. The Undo button (or Ctrl/⌘ Z) names what it will undo: deletions, cuts, shifts,
+  **Shift origin** moves atoms, fields and every trajectory frame together: by fractions of a, b, c for crystals
+  (periodic fields shift exactly, by whole grid steps plus a sub-step origin offset), by fractions of the box for a
+  molecule in a box (cube files, clusters), and in Å when nothing has a cell (xyz, PDB). **Center on atom** puts the
+  selected atom in the middle of its cell or box; without a cell it makes the view turn about that atom. The Undo button (or Ctrl/⌘ Z) names what it will undo: deletions, cuts, shifts,
   removed layers, derived cells.
 - **Trajectories**: a player appears under the view: play and pause (`Space`), drag through frames, step with `←` `→`
   (`Shift` for ten, `Home` / `End` for the ends). The Trajectory panel sets the speed (1-60 frames per second), shows
@@ -91,6 +96,9 @@ blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
 ## Develop
 
 A static site with no build step. Serve the folder with any static server (`python3 -m http.server`) and open it.
+Before deploying a change, run `node tools/version.mjs N` with a new N: it puts `?v=N` on the stylesheet, the app,
+every module import and the worker, so browsers never mix cached old modules with new ones (a module worker does not
+use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).

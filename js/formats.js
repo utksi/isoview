@@ -4,7 +4,7 @@
  * (multi-frame files: XDATCAR, OUTCAR, vasprun.xml, xyz, AXSF, LAMMPS dumps, pw.x output, PDB, .gro, CASTEP .md/.geom
  * are read by traj.js and add traj, the frames; structure is then frame 0)
  * structure = { lattice: [[3],[3],[3]] | null (rows a, b, c in Angstrom), pbc: boolean, species: [symbol],
- *               pos: Float64Array(3N) Cartesian Angstrom }
+ *               pos: Float64Array(3N) Cartesian Angstrom, origin?: [3] (corner of a non-periodic box, A; default 0) }
  * Field     = { name, unit, n: [nx, ny, nz], data: Float32Array (x index fastest: i + nx (j + ny k)),
  *               origin: [3] (Angstrom), span: [[3],[3],[3]], periodic, closed, kind }
  * Grid point (i, j, k) sits at origin + (i/dx) span[0] + (j/dy) span[1] + (k/dz) span[2], with d = n for periodic
@@ -16,10 +16,10 @@
  * Units: VASP CHGCAR-type files store rho * V_cell; they are divided by V_cell here (e/A^3). LOCPOT (eV) and ELFCAR
  * are kept as stored. Cube files in Bohr (positive voxel counts) are converted to Angstrom; their values are kept.
  */
-import { Cursor, readNumbers, tokens } from "./numbers.js";
-import { elementOf, SYMBOLS } from "./elements.js";
-import { BOHR, det3, inv3, fracToCart, fromParams, norm } from "./lattice.js";
-import { finish, parseXDATCAR, parseOUTCAR, parseVasprun, parseXYZFrames, parseLAMMPS, parseQEout, parsePDB, parseGRO, parseCASTEP } from "./traj.js";
+import { Cursor, readNumbers, tokens } from "./numbers.js?v=10";
+import { elementOf, SYMBOLS } from "./elements.js?v=10";
+import { BOHR, det3, inv3, fracToCart, fromParams, norm } from "./lattice.js?v=10";
+import { finish, parseXDATCAR, parseOUTCAR, parseVasprun, parseXYZFrames, parseLAMMPS, parseQEout, parsePDB, parseGRO, parseCASTEP } from "./traj.js?v=10";
 
 /* ------------------------------------------------------------------ detection */
 
@@ -244,7 +244,7 @@ export function parseXSF(text) {
     const closed = !!(structure.pbc && almost(f.span, lattice, 1e-3) && f.origin.every(x => Math.abs(x) < 1e-4));
     return field(f.gname, "", f.n, f.data, f.origin, f.span, false, null, closed);
   });
-  if (!lattice && out.length) structure.lattice = out[0].span.map(r => r.slice());
+  if (!lattice && out.length) { structure.lattice = out[0].span.map(r => r.slice()); structure.origin = out[0].origin.slice(); }
   return { title: "", structure, fields: out, notes };
 }
 
@@ -286,8 +286,9 @@ export function parseCube(text) {
     const span = v.map((r, a) => r.map(x => x * (n[a] - 1)));
     fields.push(field(ids ? `orbital ${ids[s]}` : nval > 1 ? `value ${s + 1}` : "cube", "", n, d, origin, span, false, null));
   }
-  const lattice = v.map((r, a) => r.map(x => x * n[a]));
-  return { title, structure: { lattice, pbc: false, species, pos: Float64Array.from(pos) }, fields, notes: [] };
+  // WHY: the box drawn is the data's own extent, from the grid origin, so the molecule sits where its field is
+  const lattice = v.map((r, a) => r.map(x => x * (n[a] - 1)));
+  return { title, structure: { lattice, pbc: false, species, pos: Float64Array.from(pos), origin }, fields, notes: [] };
 }
 
 /* ------------------------------------------------------------------ CIF */

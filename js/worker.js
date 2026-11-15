@@ -12,14 +12,16 @@
  *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
  *   drop { ds }                           -> {}  (frees the dataset)
  * meta = the field without `data`, plus `stats`.
+ * Fields are refined on opening (field.js refine: grid step <= 0.1 A, at most 4 M points) and WAVECAR orbitals are
+ * built on an FFT box of the same size limits (wavecar.js), so isosurfaces of coarse data are smooth.
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js";
-import { isUlm, parseAseTraj } from "./traj.js";
-import { Wavecar } from "./wavecar.js";
-import { stats, renderGrid } from "./field.js";
-import { marchingCubes } from "./gfx/mc.js";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=10";
+import { isUlm, parseAseTraj } from "./traj.js?v=10";
+import { Wavecar } from "./wavecar.js?v=10";
+import { stats, renderGrid, refine } from "./field.js?v=10";
+import { marchingCubes } from "./gfx/mc.js?v=10";
 
 const DS = new Map();
 let nextDs = 1;
@@ -29,14 +31,14 @@ const transfers = m => [m.stats.sorted.buffer, m.stats.cum.buffer];
 
 /** hydrogen 3d(x2-y2): psi = (x^2 - y^2) exp(-r / 3 a0) / (81 sqrt(2 pi) a0^(7/2)), normalised (A^-3/2). */
 function hydrogen3d() {
-  const n = 72, L = 26, h = L / (n - 1), a0 = 0.529177210903, c = 1 / (81 * Math.sqrt(2 * Math.PI) * Math.pow(a0, 3.5));
+  const n = 128, L = 26, h = L / (n - 1), a0 = 0.529177210903, c = 1 / (81 * Math.sqrt(2 * Math.PI) * Math.pow(a0, 3.5));
   const data = new Float32Array(n * n * n);
   for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const x = -L / 2 + i * h, y = -L / 2 + j * h, z = -L / 2 + k * h;
     data[i + n * (j + n * k)] = c * (x * x - y * y) * Math.exp(-Math.hypot(x, y, z) / (3 * a0));
   }
   const box = [[L, 0, 0], [0, L, 0], [0, 0, L]];
-  return { title: "hydrogen 3d(x²−y²)", structure: { lattice: box, pbc: false, species: ["H"], pos: Float64Array.from([0, 0, 0]) },
+  return { title: "hydrogen 3d(x²−y²)", structure: { lattice: box, pbc: false, species: ["H"], pos: Float64Array.from([0, 0, 0]), origin: [-L / 2, -L / 2, -L / 2] },
     fields: [{ name: "ψ 3d(x²−y²)", unit: "Å⁻³ᐟ²", n: [n, n, n], data, origin: [-L / 2, -L / 2, -L / 2], span: box, periodic: false, closed: false, kind: "signed" }], notes: [] };
 }
 
@@ -63,7 +65,8 @@ async function open(list) {
     if (d.fields.length && !fields.length) { fields = d.fields; if (!structure || !structure.species.length) structure = d.structure; }
     else if (!structure || (!structure.species.length && d.structure.species.length)) structure = d.structure;
   }
-  return { structure, fields, wave, traj, notes, title };
+  // WHY: coarse grids give faceted surfaces; a finer copy (Fourier for periodic grids, cubic otherwise) is smooth
+  return { structure, fields: fields.map(f => refine(f)), wave, traj, notes, title };
 }
 
 function waveHeader(w) {
@@ -88,7 +91,7 @@ export async function handle(msg) {
   if (op === "orbital") {
     const w = W.wave, r = await w.orbital(msg.s, msg.k, msg.b, { signed: msg.signed, half: msg.half });
     const f = { name: `band ${msg.b + 1}${w.nspin === 2 ? (msg.s ? " ↓" : " ↑") : ""}${r.signed ? " ψ" : " |ψ|²"}`, unit: r.signed ? "Å⁻³ᐟ²" : "Å⁻³",
-      n: r.n, data: r.data, origin: [0, 0, 0], span: w.lattice, periodic: true, closed: false, kind: r.signed ? "signed" : "density" };
+      n: r.n, n0: r.n0, data: r.data, origin: [0, 0, 0], span: w.lattice, periodic: true, closed: false, kind: r.signed ? "signed" : "density" };
     W.fields = [f];
     const m = meta(f);
     return { result: { field: m }, transfer: transfers(m) };

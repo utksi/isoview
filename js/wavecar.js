@@ -15,12 +15,13 @@
  *   The other half follows from c(-G) = conj c(G), and the stored G != 0 coefficients carry a factor sqrt 2,
  *   which is removed.
  * Orbital: psi(r_j) = sum_G c_G exp(i (k + G) . r_j); |psi|^2 equals |u_k|^2, the periodic part. The grid has
- * N_i >= 2 m_i + 1 points per axis (exact psi at the grid points). Output densities are normalised to one
+ * N_i >= 2 m_i + 1 points per axis (exact psi at the grid points), a power of two, raised to a step <= h = 0.1 A while
+ * the grid stays within about 4 M points (a finer grid is still exact: it only samples the same sum more densely). Output densities are normalised to one
  * electron over the cell (1/A^3); the signed Gamma-only orbital to int psi^2 dV = 1 (A^-3/2). Only the smooth
  * part of the PAW orbital is available (no augmentation inside the spheres).
  */
-import { fft3, nextPow2 } from "./fft.js";
-import { det3, inv3 } from "./lattice.js";
+import { fft3, nextPow2 } from "./fft.js?v=10";
+import { det3, inv3 } from "./lattice.js?v=10";
 
 const C = 0.262465831;
 
@@ -103,8 +104,9 @@ export class Wavecar {
 
   /**
    * Orbital field of band b (0-based), spin s, k-point k.
-   * opts.signed: return psi (Gamma-only build) instead of |psi|^2; opts.half: 'x' or 'z' (Gamma-only half sphere).
-   * Returns { n, data (Float32Array, x fastest), signed, maxImag }.
+   * opts.signed: return psi (Gamma-only build) instead of |psi|^2; opts.half: 'x' or 'z' (Gamma-only half sphere);
+   * opts.h, opts.maxPts: target grid step (A) and point budget (file header).
+   * Returns { n, n0 (the smallest exact grid), data (Float32Array, x fastest), signed, maxImag }.
    */
   async orbital(s, k, b, opts = {}) {
     const np = this.nplw[s][k], bytes = this.tag === 45200 ? 8 : 16;
@@ -117,6 +119,16 @@ export class Wavecar {
     for (let i = 0; i < npw; i++) for (let a = 0; a < 3; a++) mx[a] = Math.max(mx[a], Math.abs(G[3 * i + a]));
     let n = mx.map(v => nextPow2(2 * v + 1));
     if (n[0] * n[1] * n[2] > 1 << 23) n = mx.map(v => 2 * v + 1);
+    // WHY: a larger FFT box samples the same plane-wave orbital more finely (exact): grid step <= h (A), at most
+    // maxPts points (halving the largest axis that is above its minimum until it fits)
+    const h = opts.h || 0.1, maxPts = opts.maxPts || 4.2e6, n0 = n.slice();
+    n = n.map((v, a) => Math.max(v, nextPow2(Math.ceil(Math.hypot(...this.lattice[a]) / h))));
+    while (n[0] * n[1] * n[2] > maxPts) {
+      let a = -1;
+      for (let b = 0; b < 3; b++) if (n[b] > n0[b] && (a < 0 || n[b] > n[a])) a = b;
+      if (a < 0) break;
+      n[a] = Math.max(n0[a], n[a] >> 1);
+    }
     const N = n[0] * n[1] * n[2];
     const idx = (i1, i2, i3) => ((i1 % n[0]) + n[0]) % n[0] + n[0] * ((((i2 % n[1]) + n[1]) % n[1]) + n[1] * (((i3 % n[2]) + n[2]) % n[2]));
     const comps = type === "ncl" ? 2 : 1;
@@ -146,6 +158,6 @@ export class Wavecar {
     const out = new Float32Array(N);
     if (psiReal) { const f = 1 / Math.sqrt(sum * dV); for (let p = 0; p < N; p++) out[p] = psiReal[p] * f; }
     else { const f = 1 / (sum * dV); for (let p = 0; p < N; p++) out[p] = rho[p] * f; }
-    return { n, data: out, signed: !!psiReal, maxImag };
+    return { n, n0, data: out, signed: !!psiReal, maxImag };
   }
 }

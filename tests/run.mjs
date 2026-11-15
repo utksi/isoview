@@ -14,7 +14,7 @@ import { fromParams, params, det3, formula, norm, dot, fracToCart, inv3, cartToF
 import { parseAseTraj } from "../js/traj.js";
 import { parseText, detectKind, parseSymop, qeLattice, isWavecarHeader } from "../js/formats.js";
 import { fft1 } from "../js/fft.js";
-import { stats, renderGrid, isoForFraction, fractionAbove, insidePolygon } from "../js/field.js";
+import { stats, renderGrid, isoForFraction, fractionAbove, insidePolygon, refine } from "../js/field.js";
 import { displayAtoms, bondList, deleteAtoms, atomId, toPOSCAR, shownStructure, toCIF, toXYZ } from "../js/structure.js";
 import { primitive, conventional, sameCellShape } from "../js/symmetry.js";
 import { Wavecar } from "../js/wavecar.js";
@@ -203,7 +203,7 @@ for (const len of [8, 7, 12]) {
   const cube = new File([`t\nt\n 1 0 0 0\n ${n} 0.3 0 0\n ${n} 0 0.3 0\n ${n} 0 0 0.3\n 1 0 3.0 3.0 3.0\n ${v.join(" ")}\n`], "g.cube");
   const r2 = await handle({ op: "open", files: [cube] });
   const f = r2.result.fields[0];
-  ok(f && f.kind === "density" && f.stats && f.stats.sorted.length === n * n * n && !("data" in f), "worker open: cube field metadata and stats, no raw data");
+  ok(f && f.kind === "density" && f.stats && f.n0.join() === "21,21,21" && f.stats.sorted.length === f.n[0] * f.n[1] * f.n[2] && !("data" in f), `worker open: cube field metadata and stats, no raw data (21^3 grid refined to ${f && f.n.join("x")})`);
   const r3 = await handle({ op: "mesh", ds: r2.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.5] });
   const mm = r3.result.meshes[0];
   ok(mm.triangles > 100 && mm.indices.length === 3 * mm.triangles && r3.transfer.length === 3, `worker mesh: ${mm.triangles} triangles, buffers transferred`);
@@ -381,13 +381,16 @@ if (env.ISOVIEW_WAVECAR) {
   const x = parseText("xyz", toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 }));
   ok(/energy=-10\.5/.test(toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 })) && x.structure.species.length === 8, "extended XYZ export carries energy=");
 }
-/* deploy: every module is in the import map, all with the version of app.js (no stale cached module after a deploy) */
+/* deploy: every cached URL carries the version of app.js (tools/version.mjs), workers included (no import maps there) */
 {
-  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const map = JSON.parse(html.match(/<script type="importmap">([^<]+)<\/script>/)[1]).imports, v = html.match(/js\/app\.js\?v=(\d+)/)[1];
-  const files = [...fs.readdirSync(new URL("../js", import.meta.url)).filter(f => f.endsWith(".js")).map(f => "./js/" + f), ...fs.readdirSync(new URL("../js/gfx", import.meta.url)).filter(f => f.endsWith(".js")).map(f => "./js/gfx/" + f)];
-  const bad = files.filter(f => map[f] !== `${f}?v=${v}`);
-  ok(!bad.length && html.includes(`css/style.css?v=${v}`), `import map versions all ${files.length} modules as v${v}${bad.length ? "; missing or stale: " + bad.join(", ") : ""}`);
+  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8"), v = html.match(/js\/app\.js\?v=(\d+)/)[1];
+  const walk = d => fs.readdirSync(new URL(d, import.meta.url), { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walk(d + e.name + "/") : e.name.endsWith(".js") ? [d + e.name] : []));
+  const bad = [];
+  for (const f of walk("../js/")) {
+    const s = fs.readFileSync(new URL(f, import.meta.url), "utf8");
+    for (const m of s.matchAll(/(?:from|import\()\s*"(\.{1,2}\/[^"]+)"|new URL\("(\.\/worker[^"]*)"/g)) { const u = m[1] || m[2]; if (!u.endsWith(`?v=${v}`)) bad.push(`${f.slice(6)}: ${u}`); }
+  }
+  ok(!bad.length && html.includes(`css/style.css?v=${v}`), `every module import and the worker URL carry v${v}${bad.length ? "; not: " + bad.slice(0, 6).join(", ") : ""}`);
 }
 /* samples on the opening page: every button has a file, every file opens with what it should show */
 {
@@ -406,6 +409,27 @@ if (env.ISOVIEW_WAVECAR) {
     catch (e) { bad.push(`${id} (${e.message})`); }
   }
   ok(!bad.length, `all ${Object.keys(SAMPLES).length} sample files open (gzip ones included) with the expected frames, fields or bands${bad.length ? "; wrong: " + bad.join(", ") : ""}`);
+}
+/* refined grids: Fourier interpolation is exact for band-limited periodic data and keeps the points and the integral;
+   Catmull-Rom is exact for quadratics inside a general grid; the point budget holds */
+{
+  const n = [12, 10, 8], L = [[3, 0, 0], [0.5, 2.5, 0], [0, 0, 2]], d = new Float32Array(n[0] * n[1] * n[2]);
+  const fn = (u, v, w) => 1.3 + Math.cos(2 * Math.PI * u) + 0.4 * Math.sin(4 * Math.PI * v) * Math.cos(2 * Math.PI * w) + 0.2 * Math.cos(6 * Math.PI * w);
+  for (let k = 0; k < n[2]; k++) for (let j = 0; j < n[1]; j++) for (let i = 0; i < n[0]; i++) d[i + n[0] * (j + n[1] * k)] = fn(i / n[0], j / n[1], k / n[2]);
+  const f = { n, data: d, span: L, periodic: true, closed: false, origin: [0, 0, 0] }, g = refine(f, 0.06);
+  let e = 0;
+  for (let k = 0; k < g.n[2]; k++) for (let j = 0; j < g.n[1]; j++) for (let i = 0; i < g.n[0]; i++) e = Math.max(e, Math.abs(g.data[i + g.n[0] * (j + g.n[1] * k)] - fn(i / g.n[0], j / g.n[1], k / g.n[2])));
+  ok(g.n.join() === "60,50,40" && e < 2e-6 && near(stats(g).integral, stats(f).integral, 1e-5) && g.data[0] === d[0], `Fourier refinement 12x10x8 -> 60x50x40: max error ${e.toExponential(1)}, integral kept`);
+  const h = [7, 6, 5], dd = new Float32Array(210), q = (x, y, z) => 0.5 * x * x - y * z + 2 * z;
+  for (let k = 0; k < 5; k++) for (let j = 0; j < 6; j++) for (let i = 0; i < 7; i++) dd[i + 7 * (j + 6 * k)] = q(i / 6, j / 5, k / 4);
+  const g2 = refine({ n: h, data: dd, span: [[3, 0, 0], [0, 2.5, 0], [0, 0, 2]], periodic: false, closed: false, origin: [0, 0, 0] }, 0.1);
+  let e2 = 0;
+  for (let k = 0; k < g2.n[2]; k++) for (let j = 0; j < g2.n[1]; j++) for (let i = 0; i < g2.n[0]; i++) {
+    const x = i / (g2.n[0] - 1), y = j / (g2.n[1] - 1), z = k / (g2.n[2] - 1);
+    if (x >= 1 / 6 && x <= 5 / 6 && y >= 0.2 && y <= 0.8 && z >= 0.25 && z <= 0.75) e2 = Math.max(e2, Math.abs(g2.data[i + g2.n[0] * (j + g2.n[1] * k)] - q(x, y, z)));
+  }
+  const big = refine({ n: [20, 20, 20], data: new Float32Array(8000), span: [[20, 0, 0], [0, 20, 0], [0, 0, 20]], periodic: true, closed: false, origin: [0, 0, 0] });
+  ok(g2.n.join() === "31,26,21" && e2 < 1e-6 && big.n.reduce((a, b) => a * b) <= 4e6, `cubic refinement exact for a quadratic (${e2.toExponential(1)}); 20^3 over 20 A refined to ${big.n.join("x")} (within 4 M points)`);
 }
 console.log(`\n${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);
