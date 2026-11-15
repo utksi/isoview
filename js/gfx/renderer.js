@@ -3,7 +3,7 @@
  * createRenderer tries WebGPU, then WebGL2 (?gl=webgl2 forces the fallback, ?gl=webgpu forbids it).
  * Packing (little-endian): atoms 20 B each = centre f32x3, radius f32, rgba u8 (a < 192 marks a selected atom);
  * bonds 36 B = p0, p1 f32x3, rgba u8 x2, radius f32; lines 28 B = p0, p1 f32x3, dashed f32 (0 or 1).
- * Uniform block (48 floats): view (16), proj (16), viewport (4), light (4), accent (4), line (4).
+ * Uniform block (60 floats): view (16), proj (16), viewport (4), light (4), accent (4), line (4), look (4), fog (4), bg (4).
  */
 import { WebGPURenderer } from "./webgpu.js";
 import { WebGL2Renderer } from "./webgl2.js";
@@ -50,9 +50,10 @@ export function packLines(segs) {
   segs.forEach((s, i) => { f.set(s.p0, 7 * i); f.set(s.p1, 7 * i + 3); f[7 * i + 6] = s.dashed ? 1 : 0; });
   return f;
 }
-export function packUniforms(view, proj, viewport, light, accent, line) {
-  const u = new Float32Array(48);
+export function packUniforms(view, proj, viewport, light, accent, line, look = [0, 0, 0, 0], fog = [0, 1, 0, 0], bg = [1, 1, 1, 1]) {
+  const u = new Float32Array(60);
   u.set(view, 0); u.set(proj, 16); u.set(viewport, 32); u.set(light, 36); u.set(accent, 40); u.set(line, 44);
+  u.set(look, 48); u.set(fog, 52); u.set(bg, 56);
   return u;
 }
 export const hexToRgb01 = hex => rgb(hex).map(v => v / 255);

@@ -1,0 +1,51 @@
+
+     Program PWSCF v.7.2 starts on 15Nov2026 at 10: 0: 0
+
+     bravais-lattice index     =            0
+     lattice parameter (alat)  =      10.2000  a.u.
+     unit-cell volume          =     265.3020 (a.u.)^3
+     number of atoms/cell      =            2
+
+     crystal axes: (cart. coord. in units of alat)
+               a(1) = (  -0.500000   0.000000   0.500000 )  
+               a(2) = (   0.000000   0.500000   0.500000 )  
+               a(3) = (  -0.500000   0.500000   0.000000 )  
+
+   Cartesian axes
+
+     site n.     atom                  positions (alat units)
+         1           Si  tau(   1) = (   0.0000000   0.0000000   0.0000000  )
+         2           Si  tau(   2) = (  -0.2500000   0.2500000   0.2500000  )
+
+!    total energy              =     -15.84445318 Ry
+
+ATOMIC_POSITIONS (alat)
+Si            0.0000000000        0.0000000000        0.0000000000
+Si           -0.2600000000        0.2500000000        0.2500000000
+
+!    total energy              =     -15.84500000 Ry
+
+CELL_PARAMETERS (alat= 10.20000000)
+  -0.510000000   0.000000000   0.510000000
+   0.000000000   0.510000000   0.510000000
+  -0.510000000   0.510000000   0.000000000
+
+ATOMIC_POSITIONS (crystal)
+Si            0.0000000000        0.0000000000        0.0000000000
+Si            0.2500000000        0.2600000000        0.2500000000
+
+!    total energy              =     -15.84600000 Ry
+
+Begin final coordinates
+
+CELL_PARAMETERS (alat= 10.20000000)
+  -0.510000000   0.000000000   0.510000000
+   0.000000000   0.510000000   0.510000000
+  -0.510000000   0.510000000   0.000000000
+
+ATOMIC_POSITIONS (crystal)
+Si            0.0000000000        0.0000000000        0.0000000000
+Si            0.2500000000        0.2600000000        0.2500000000
+End final coordinates
+
+     JOB DONE.

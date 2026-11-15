@@ -4,7 +4,8 @@
  * slider) and finished meshes (transferred, not copied).
  * Several datasets (one per loaded file group) are kept at once, keyed by the id that open returns, so layers from
  * different files can be shown together. Requests { id, op, ... } -> replies { id, ok, result | error }:
- *   open { files }                        -> { ds, structure, fields: [meta], wave: header | null, notes, title }
+ *   open { files }                        -> { ds, structure, fields: [meta], wave: header | null, traj | null, notes, title }
+ *                                            (traj: the frames of a trajectory file, traj.js; its arrays are transferred)
  *   example { name: 'h3d' }               -> same shape (hydrogen 3d(x2 - y2) orbital computed here)
  *   orbital { ds, s, k, b, signed, half } -> { field: meta }  (becomes field 0 of dataset ds)
  *   mesh { ds, fi, reps, stride, isos: [..], shift, cuts }
@@ -13,6 +14,7 @@
  * meta = the field without `data`, plus `stats`.
  */
 import { detectKind, parseText, isWavecarHeader } from "./formats.js";
+import { isUlm, parseAseTraj } from "./traj.js";
 import { Wavecar } from "./wavecar.js";
 import { stats, renderGrid } from "./field.js";
 import { marchingCubes } from "./gfx/mc.js";
@@ -37,17 +39,19 @@ function hydrogen3d() {
 }
 
 async function open(files) {
-  let structure = null, fields = [], wave = null, notes = [], title = "";
+  let structure = null, fields = [], wave = null, traj = null, notes = [], title = "";
   for (const f of files) {
     const head = await f.slice(0, 65536).arrayBuffer();
     if (isWavecarHeader(head)) { wave = await Wavecar.open((o, l) => f.slice(o, o + l).arrayBuffer()); continue; }
-    const text = await f.text();
-    const d = parseText(detectKind(f.name, text.slice(0, 65536)), text, f.name);
+    let d;
+    if (isUlm(head)) d = parseAseTraj(await f.arrayBuffer());
+    else { const text = await f.text(); d = parseText(detectKind(f.name, text.slice(0, 65536)), text, f.name); }
     notes.push(...d.notes); title = title || d.title;
+    if (d.traj && !traj && !fields.length) { traj = d.traj; structure = d.structure; continue; }
     if (d.fields.length && !fields.length) { fields = d.fields; if (!structure || !structure.species.length) structure = d.structure; }
     else if (!structure || (!structure.species.length && d.structure.species.length)) structure = d.structure;
   }
-  return { structure, fields, wave, notes, title };
+  return { structure, fields, wave, traj, notes, title };
 }
 
 function waveHeader(w) {
@@ -62,8 +66,9 @@ export async function handle(msg) {
     const ds = nextDs++;
     DS.set(ds, { fields: d.fields, wave: d.wave || null });
     const metas = d.fields.map(meta);
-    return { result: { ds, structure: d.structure, fields: metas, wave: d.wave ? waveHeader(d.wave) : null, notes: d.notes, title: d.title },
-      transfer: metas.flatMap(transfers) };
+    const tr = d.traj || null;
+    return { result: { ds, structure: d.structure, fields: metas, wave: d.wave ? waveHeader(d.wave) : null, traj: tr, notes: d.notes, title: d.title },
+      transfer: [...metas.flatMap(transfers), ...(tr ? [tr.pos.buffer, tr.cells && tr.cells.buffer, tr.energy && tr.energy.buffer].filter(Boolean) : [])] };
   }
   if (op === "drop") { DS.delete(msg.ds); return { result: {}, transfer: [] }; }
   const W = DS.get(msg.ds);

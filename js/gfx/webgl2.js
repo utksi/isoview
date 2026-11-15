@@ -37,7 +37,7 @@ export class WebGL2Renderer {
     this.pLabel = prog("label", GLSL.label);
     this.uAtlas = gl.getUniformLocation(this.pLabel, "atlas");
     this.ubo = gl.createBuffer();
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo); gl.bufferData(gl.UNIFORM_BUFFER, 192, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo); gl.bufferData(gl.UNIFORM_BUFFER, 240, gl.DYNAMIC_DRAW);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
     const stat = a => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, a, gl.STATIC_DRAW); return b; };
     this.quad = stat(QUAD); this.lineq = stat(LINEQ); this.cyl = stat(CYL);

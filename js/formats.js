@@ -1,6 +1,8 @@
 /**
  * Readers for structure and volumetric text formats. Every reader returns a dataset
- *   { title, structure, fields: [Field], notes: [string] }
+ *   { title, structure, fields: [Field], notes: [string], traj? }
+ * (multi-frame files: XDATCAR, OUTCAR, vasprun.xml, xyz, AXSF, LAMMPS dumps, pw.x output, PDB, .gro, CASTEP .md/.geom
+ * are read by traj.js and add traj, the frames; structure is then frame 0)
  * structure = { lattice: [[3],[3],[3]] | null (rows a, b, c in Angstrom), pbc: boolean, species: [symbol],
  *               pos: Float64Array(3N) Cartesian Angstrom }
  * Field     = { name, unit, n: [nx, ny, nz], data: Float32Array (x index fastest: i + nx (j + ny k)),
@@ -17,6 +19,7 @@
 import { Cursor, readNumbers, tokens } from "./numbers.js";
 import { elementOf, SYMBOLS } from "./elements.js";
 import { BOHR, det3, inv3, fracToCart, fromParams, norm } from "./lattice.js";
+import { finish, parseXDATCAR, parseOUTCAR, parseVasprun, parseXYZFrames, parseLAMMPS, parseQEout, parsePDB, parseGRO, parseCASTEP } from "./traj.js";
 
 /* ------------------------------------------------------------------ detection */
 
@@ -32,6 +35,14 @@ export function isWavecarHeader(buf) {
 /** Format of a text file from its name and its first ~64 kB. */
 export function detectKind(name, head) {
   const n = (name || "").toLowerCase(), base = n.split(/[\\/]/).pop();
+  if (/xdatcar/.test(base) || /^\s*(Direct|Cartesian) configuration=/m.test(head)) return "xdatcar";
+  if (/outcar/.test(base) || (/^\s*vasp\.\d/.test(head) && /POTCAR:/.test(head))) return "outcar";
+  if (/\.xml$/.test(n) && /<modeling>/.test(head)) return "vasprun";
+  if (/\.(lammpstrj|dump|lammps)$/.test(n) || /^ITEM:\s*TIMESTEP/.test(head)) return "lammps";
+  if (/Program PWSCF/.test(head)) return "qeout";
+  if (/\.(pdb|ent)$/.test(n) || /^(CRYST1|MODEL |HETATM|ATOM  )/m.test(head.slice(0, 4096))) return "pdb";
+  if (/\.gro$/.test(n)) return "gro";
+  if (/\.(md|geom)$/.test(n) && /<--\s*[RhE]\s*$/m.test(head)) return "castep";
   if (/\.cif$/.test(n)) return "cif";
   if (/\.a?xsf$/.test(n)) return "xsf";
   if (/\.cube?$/.test(n)) return "cube";
@@ -56,8 +67,16 @@ export function parseText(kind, text, name = "") {
     case "xsf": return parseXSF(text);
     case "cube": return parseCube(text);
     case "pw": return parsePW(text);
-    case "xyz": return parseXYZ(text);
+    case "xyz": return parseXYZFrames(text);
     case "aims": return parseAims(text);
+    case "xdatcar": return parseXDATCAR(text);
+    case "outcar": return parseOUTCAR(text);
+    case "vasprun": return parseVasprun(text);
+    case "lammps": return parseLAMMPS(text);
+    case "qeout": return parseQEout(text);
+    case "pdb": return parsePDB(text);
+    case "gro": return parseGRO(text);
+    case "castep": return parseCASTEP(text);
     default: throw new Error("unknown format " + kind);
   }
 }
@@ -165,8 +184,8 @@ export function parseVasp(text, name = "") {
 
 export function parseXSF(text) {
   const cur = new Cursor(text);
-  let lattice = null, pbc = false, species = [], pos = [], block = "";
-  const fields = [], notes = [];
+  let lattice = null, pbc = false, species = [], pos = [], block = "", anim = 0;
+  const fields = [], notes = [], frames = [], cells = [];
   const KW = /^(ATOMS|CRYSTAL|SLAB|POLYMER|MOLECULE|PRIMVEC|CONVVEC|PRIMCOORD|CONVCOORD|ANIMSTEPS|BEGIN_|END_|DATAGRID)/i;
   const read3 = () => [0, 1, 2].map(() => tokens(cur.nonEmpty() ?? "").slice(0, 3).map(Number));
   const atomLine = t => ({ el: elementOf(t[0]), r: t.slice(1, 4).map(Number) });
@@ -177,14 +196,14 @@ export function parseXSF(text) {
     const kw = t[0].toUpperCase();
     if (kw === "CRYSTAL" || kw === "SLAB" || kw === "POLYMER") pbc = true;
     else if (kw === "MOLECULE") pbc = false;
-    else if (kw === "ANIMSTEPS") notes.push(`animated XSF (${t[1]} steps): showing the last structure`);
+    else if (kw === "ANIMSTEPS") anim = parseInt(t[1]) || 0;
     else if (kw === "PRIMVEC") lattice = read3();
     else if (kw === "CONVVEC") read3();
     else if (kw === "PRIMCOORD" || kw === "CONVCOORD") {
       const nat = parseInt(tokens(cur.nonEmpty())[0]);
       const sp = [], ps = [];
       for (let i = 0; i < nat; i++) { const a = atomLine(tokens(cur.nonEmpty())); sp.push(a.el); ps.push(...a.r); }
-      if (kw === "PRIMCOORD") { species = sp; pos = ps; }
+      if (kw === "PRIMCOORD") { species = sp; pos = ps; if (anim) { frames.push({ sp, ps }); cells.push(lattice); } }
     } else if (kw === "ATOMS") {
       const sp = [], ps = [];
       for (;;) {
@@ -196,6 +215,7 @@ export function parseXSF(text) {
         const a = atomLine(u); sp.push(a.el); ps.push(...a.r);
       }
       species = sp; pos = ps;
+      if (anim) { frames.push({ sp, ps }); cells.push(lattice); }
     } else if (kw.startsWith("BEGIN_BLOCK_DATAGRID_3D") || kw === "BLOCK_DATAGRID_3D") {
       block = (cur.nonEmpty() ?? "").trim();
     } else if (/^(BEGIN_)?DATAGRID_3D/.test(kw)) {
@@ -211,6 +231,14 @@ export function parseXSF(text) {
       notes.push("2D data grids are skipped");
     }
   }
+  if (frames.length > 1 && !fields.length) {
+    // animated XSF: frames with the atoms of the first one (a frame with other atoms ends the animation)
+    const sp0 = frames[0].sp, ok = frames.findIndex(f => f.sp.length !== sp0.length || f.sp.some((s, i) => s !== sp0[i]));
+    const use = ok < 0 ? frames : frames.slice(0, ok);
+    if (ok >= 0) notes.push(`step ${ok + 1} of the animation has other atoms; it stops before it`);
+    return finish(sp0, use.map(f => Float64Array.from(f.ps)), cells.slice(0, use.length), [], { pbc, notes });
+  }
+  if (frames.length > 1) notes.push(`animated XSF with data grids: showing the last of ${frames.length} structures`);
   const structure = { lattice: lattice, pbc: pbc && !!lattice, species, pos: Float64Array.from(pos) };
   const out = fields.map(f => {
     const closed = !!(structure.pbc && almost(f.span, lattice, 1e-3) && f.origin.every(x => Math.abs(x) < 1e-4));
@@ -498,41 +526,7 @@ export function parsePW(text) {
   return { title, structure: { lattice: L, pbc: true, species, pos: Float64Array.from(pos) }, fields: [], notes: [] };
 }
 
-/* ------------------------------------------------------------------ xyz / extended xyz */
-
-export function parseXYZ(text) {
-  const cur = new Cursor(text), frames = [];
-  for (;;) {
-    const l = cur.nonEmpty();
-    if (l === null) break;
-    const n = parseInt(l);
-    if (!Number.isInteger(n)) break;
-    const comment = cur.line() ?? "";
-    const rows = [];
-    for (let i = 0; i < n; i++) rows.push(tokens(cur.line() ?? ""));
-    frames.push({ comment, rows });
-  }
-  if (!frames.length) throw new Error("xyz: no frames");
-  const f = frames[frames.length - 1];
-  const lat = f.comment.match(/Lattice\s*=\s*"([^"]+)"/i);
-  let si = 0, pi = 1;
-  const pr = f.comment.match(/Properties\s*=\s*(\S+)/i);
-  if (pr) {
-    const p = pr[1].split(":");
-    let c = 0;
-    for (let k = 0; k + 2 < p.length; k += 3) {
-      if (/^species$/i.test(p[k])) si = c;
-      if (/^pos(itions)?$/i.test(p[k])) pi = c;
-      c += +p[k + 2];
-    }
-  }
-  const species = f.rows.map(r => elementOf(r[si]));
-  const pos = Float64Array.from(f.rows.flatMap(r => r.slice(pi, pi + 3).map(Number)));
-  let lattice = null;
-  if (lat) { const v = lat[1].trim().split(/\s+/).map(Number); lattice = [v.slice(0, 3), v.slice(3, 6), v.slice(6, 9)]; }
-  const notes = frames.length > 1 ? [`${frames.length} frames: showing the last one`] : [];
-  return { title: "", structure: { lattice, pbc: !!lattice, species, pos }, fields: [], notes };
-}
+/* ------------------------------------------------------------------ xyz / extended xyz: traj.js parseXYZFrames */
 
 /* ------------------------------------------------------------------ FHI-aims geometry.in */
 

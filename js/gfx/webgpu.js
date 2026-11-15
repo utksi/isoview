@@ -4,7 +4,7 @@
  * writes off) and a blended pass with depth test <= and no depth writes, so only its front layer is blended over the
  * opaque scene (no sorting needed). Instance layouts (bytes): sphere 20 = centre f32x3, radius f32, colour unorm8x4;
  * bond 36 = p0, p1 f32x3, colours unorm8x4 x2, radius f32; line 28 = p0, p1 f32x3, dashed f32.
- * Mesh: positions f32x3, normals snorm16x4, uint32 indices. Uniforms: 192-byte block (see shaders.js).
+ * Mesh: positions f32x3, normals snorm16x4, uint32 indices. Uniforms: 240-byte block (see shaders.js).
  * Labels (after the opaque meshes, before translucent ones): 44-byte instances (gfx/labels.js), premultiplied blending,
  * depth test without depth writes; the atlas is an rgba8 texture with a full mip chain made by repeated halving.
  */
@@ -38,7 +38,7 @@ export class WebGPURenderer {
     const U = GPUB(), S = GPUS();
     const mod = device.createShaderModule({ code: WGSL });
     if (mod.getCompilationInfo) mod.getCompilationInfo().then(ci => { const e = ci.messages.filter(m => m.type === "error"); if (e.length && onError) onError("WGSL: " + e.map(m => `${m.lineNum}:${m.linePos} ${m.message}`).join("; ")); });
-    this.ubuf = device.createBuffer({ size: 192, usage: U.UNIFORM | U.COPY_DST });
+    this.ubuf = device.createBuffer({ size: 240, usage: U.UNIFORM | U.COPY_DST });
     const ent = [{ binding: 0, visibility: S.VERTEX | S.FRAGMENT, buffer: { type: "uniform" } }];
     this.bgl0 = device.createBindGroupLayout({ entries: ent });
     this.bgl1 = device.createBindGroupLayout({ entries: ent });
@@ -143,7 +143,7 @@ export class WebGPURenderer {
     this.size = [w, h];
   }
 
-  /** uniforms: Float32Array(48) laid out as block U. */
+  /** uniforms: Float32Array(60) laid out as block U. */
   draw(uniforms) {
     const d = this.device;
     if (!this.canvas.width || !this.canvas.height) return;

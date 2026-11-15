@@ -10,12 +10,13 @@
 import fs from "node:fs";
 import { readNumbers } from "../js/numbers.js";
 import { SYMBOLS, elementOf, rcov, colorOf, SPACERS } from "../js/elements.js";
-import { fromParams, params, det3, formula, norm, dot, fracToCart } from "../js/lattice.js";
+import { fromParams, params, det3, formula, norm, dot, fracToCart, inv3, cartToFrac, BOHR } from "../js/lattice.js";
+import { parseAseTraj } from "../js/traj.js";
 import { parseText, detectKind, parseSymop, qeLattice, isWavecarHeader } from "../js/formats.js";
 import { fft1 } from "../js/fft.js";
 import { stats, renderGrid, isoForFraction, fractionAbove, insidePolygon } from "../js/field.js";
 import { displayAtoms, bondList, deleteAtoms, atomId, toPOSCAR, shownStructure, toCIF, toXYZ } from "../js/structure.js";
-import { primitive, conventional } from "../js/symmetry.js";
+import { primitive, conventional, sameCellShape } from "../js/symmetry.js";
 import { Wavecar } from "../js/wavecar.js";
 import { marchingCubes } from "../js/gfx/mc.js";
 import { Camera, qfromRows, qmat, pickSphere } from "../js/gfx/camera.js";
@@ -260,6 +261,8 @@ for (const len of [8, 7, 12]) {
   ok(primitive(nacl).structure.species.length === 2 && conventional(nacl).structure.species.length === 8, "NaCl: primitive 2, conventional 8");
   const rut = parseText("cif", fs.readFileSync(new URL("../examples/rutile-TiO2.cif", import.meta.url), "utf8")).structure, cr = conventional(rut);
   ok(primitive(rut).n === 1 && cr.system === "tetragonal" && near(params(cr.structure.lattice)[2], 2.9587, 1e-6), "rutile: primitive, conventional tetragonal");
+  ok(sameCellShape(rut, cr.structure) && sameCellShape(nacl, conventional(nacl).structure) && !sameCellShape(cu, p.structure) && !sameCellShape(nacl, primitive(nacl).structure),
+    "already conventional: rutile and cubic NaCl come back as the same cell (no new layer); fcc primitive does not");
   const rh = conventional(mk(fromParams(4, 4, 4, 70, 70, 70), ["Bi"], [[0, 0, 0]]));
   ok(rh.system === "rhombohedral" && rh.z === 3 && near(params(rh.structure.lattice)[5], 120, 1e-6), "rhombohedral lattice -> hexagonal triple cell");
   const oc = conventional(mk([[3, 0, 0], [0, 4, 0], [0, 0, 5]], ["C", "C"], [[0, 0, 0], [0.5, 0.5, 0]]));
@@ -346,6 +349,37 @@ if (env.ISOVIEW_WAVECAR) {
     const s = await w.orbital(spin, 0, band - 1, { signed: true });
     ok(s.signed && s.maxImag < 1e-6, `Gamma-only psi is real (max |Im|/max |Re| = ${s.maxImag.toExponential(1)})`);
   }
+}
+/* trajectories: synthetic NaCl and Si files (tests/fixtures), compared with ASE 3.26 reads of the same files (.gro:
+   nm with 3 decimals, so up to 0.005 A per component and 0.0087 A per vector) */
+{
+  const F = n => new URL("fixtures/" + n, import.meta.url), ref = JSON.parse(fs.readFileSync(F("traj_ref.json"), "utf8"));
+  const read = n => { const t = fs.readFileSync(F(n), "utf8"); return parseText(detectKind(n, t.slice(0, 65536)), t, n); };
+  const maxd = (d, r, wrap) => {
+    let m = 0;
+    r.pos.forEach((row, f) => {
+      const nat = row.length / 3, p = d.traj.pos.subarray(3 * nat * f, 3 * nat * (f + 1));
+      const C = d.traj.cells ? [0, 1, 2].map(i => Array.from(d.traj.cells.subarray(9 * f + 3 * i, 9 * f + 3 * i + 3))) : d.structure.lattice, Ci = C && inv3(C);
+      for (let i = 0; i < row.length; i += 3) {
+        let dv = [0, 1, 2].map(k => p[i + k] - row[i + k]);
+        if (wrap && Ci) { const fr = cartToFrac(Ci, dv).map(x => x - Math.round(x)); dv = fracToCart(C, fr); }
+        m = Math.max(m, Math.hypot(...dv));
+      }
+    });
+    return m;
+  };
+  const b = fs.readFileSync(F("t.traj")), tr = parseAseTraj(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+  ok(tr.traj.n === 4 && maxd(tr, ref.traj) < 1e-9 && tr.traj.energy[3] === -13 && tr.traj.cells, "ASE .traj (ULM): 4 frames, positions, cells and energies as ASE reads them");
+  for (const [file, key, n, tol] of [["t.extxyz", "extxyz", 4, 1e-9], ["XDATCAR_npt", "xdat_npt", 4, 1e-6], ["t.axsf", "axsf", 4, 1e-9], ["t.pdb", "pdb", 4, 1e-9], ["t.gro", "gro", 3, 9e-3], ["tri.lammpstrj", "tri", 3, 1e-8], ["si.pwo", "qe", 3, 1e-8]]) {
+    const d = read(file), m = maxd(d, ref[key], key !== "gro" && key !== "tri" && key !== "qe");
+    ok(d.traj && d.traj.n === n && m < tol, `${file}: ${d.traj && d.traj.n} frames, max |dr| ${m.toExponential(1)} A against the reference`);
+  }
+  const md = read("si.md");
+  ok(md.traj && md.traj.n === 2 && near(md.traj.energy[1], -8.54 * 27.211386245988, 1e-6) && near(md.structure.lattice[0][0], 10.2 * BOHR, 1e-12), "CASTEP .md: Bohr and Hartree converted");
+  const od = read("ortho.dump");
+  ok(od.traj.n === 2 && od.structure.species.join() === "H,He,H,He" && od.notes.length === 1, "LAMMPS dump with types only: types read as atomic numbers, with a note");
+  const x = parseText("xyz", toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 }));
+  ok(/energy=-10\.5/.test(toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 })) && x.structure.species.length === 8, "extended XYZ export carries energy=");
 }
 console.log(`\n${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);

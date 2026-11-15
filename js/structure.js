@@ -153,9 +153,11 @@ export function toCIF(st, title = "isoview") {
   return lines.join("\n") + "\n";
 }
 
-/** Extended XYZ text: Lattice (A) and pbc in the comment line when the structure has a cell. */
-export function toXYZ(st, title = "isoview") {
-  const head = st.lattice ? `Lattice="${st.lattice.flat().map(x => x.toFixed(8)).join(" ")}" Properties=species:S:1:pos:R:3 pbc="${st.pbc ? "T T T" : "F F F"}" comment="${title.replace(/"/g, "'")}"` : title;
+/** Extended XYZ text: Lattice (A) and pbc in the comment line when the structure has a cell; props.energy (eV) is
+ *  written as energy=... when given. */
+export function toXYZ(st, title = "isoview", props = {}) {
+  const en = Number.isFinite(props.energy) ? ` energy=${props.energy.toFixed(8)}` : "";
+  const head = st.lattice ? `Lattice="${st.lattice.flat().map(x => x.toFixed(8)).join(" ")}" Properties=species:S:1:pos:R:3${en} pbc="${st.pbc ? "T T T" : "F F F"}" comment="${title.replace(/"/g, "'")}"` : title + en;
   const lines = [String(st.species.length), head];
   st.species.forEach((s, i) => lines.push(`${s.padEnd(3)} ${[0, 1, 2].map(c => st.pos[3 * i + c].toFixed(8).padStart(14)).join(" ")}`));
   return lines.join("\n") + "\n";

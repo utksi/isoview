@@ -15,16 +15,27 @@
  * Level slider: log10 |iso| over six decades below max |f| (densities, signed fields; signed fields get +iso and -iso
  * surfaces), linear over [min, max] (potentials, ELF); the readout is the share of sum |f| inside the surface.
  * Frames are drawn on demand. Label mode (L) puts element symbols on clicked atoms (gfx/labels.js).
+ * Trajectories (traj.js): an item with traj keeps every frame; its structure holds the current frame S.frame (clamped to
+ * its own frame count) for the atoms it still has (structure.ids), so deletions apply to all frames. Playback advances
+ * S.step frames every 1 / S.fps seconds (loop, bounce or stop at the end). Movies render each chosen frame into a
+ * canvas: GIF (gif.js) with delays of 100 / fps centiseconds, the remainder carried; video via MediaRecorder, frames
+ * pushed at 1 / fps second intervals.
+ * Looks (LOOKS, shaders.js): lighting mode, outline width and depth fog sent as uniforms; fog runs over the view depths
+ * of the scene's bounding sphere, cam.dist -+ cam.radius.
+ * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
+ * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
 import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js";
 import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js";
 import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js";
-import { primitive, conventional } from "./symmetry.js";
+import { primitive, conventional, sameCellShape } from "./symmetry.js";
 import { colorOf, rcov, SPACERS } from "./elements.js";
 import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js";
 import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js";
 import { buildAtlas, packLabels } from "./gfx/labels.js";
 import { measureAll } from "./measure.js";
+import { GifWriter, buildPalette } from "./gif.js";
+import * as store from "./store.js";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -36,7 +47,10 @@ const S = {
   items: new Map(), layers: [], active: null, activeAtoms: null, t: [0, 0, 0],
   style: "ball", scale: 1, bonds: true, tol: 1.15, cell: true, reps: [1, 1, 1], boundary: true, res: "auto",
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
+  frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "classic",
 };
+// render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
+const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
 let nextItem = 1, nextLayer = 1;
 const cam = new Camera();
 let R = null, canvas = $("gl"), pal = {}, disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
@@ -126,13 +140,15 @@ function resize() {
   requestRender();
 }
 let dirty = false;
-function requestRender() { if (!dirty) { dirty = true; requestAnimationFrame(frame); } }
+function requestRender() { if (!dirty) { dirty = true; requestAnimationFrame(frame); } saveSoon(); }
 function frame() {
   dirty = false;
   if (!R) return;
   const dpr = canvas.width / cam.w;
+  const lk = LOOKS[S.look] || LOOKS.classic;
   R.draw(packUniforms(cam.view(), cam.proj(R.name === "WebGPU" ? "gpu" : "gl"), [canvas.width, canvas.height, dpr, cam.ortho ? 1 : 0],
-    [0.35, 0.55, 1.0, 0.32], [...pal.accent, 0.33], [...pal.cell, 1.3 * dpr]));
+    [0.35, 0.55, 1.0, 0.32], [...pal.accent, 0.33], [...pal.cell, 1.3 * dpr],
+    [lk[0], lk[1] * dpr, lk[2], 0], [cam.dist - cam.radius, cam.dist + cam.radius, 0, 0], [...pal.bg, 1]));
   drawOverlay(); drawTriad();
 }
 
@@ -465,7 +481,7 @@ function pushUndo(u) { S.undo.push(u); if (S.undo.length > 50) S.undo.shift(); u
 function undo() {
   const u = S.undo.pop();
   if (!u) return toast("Nothing to undo.");
-  if (u.type === "atoms") { for (const c of u.changes) c.it.structure = c.old; S.labels = u.labels; S.sel = []; buildStructure(); }
+  if (u.type === "atoms") { for (const c of u.changes) { c.it.structure = c.old; applyFrame(c.it); } S.labels = u.labels; S.sel = []; buildStructure(); }
   else if (u.type === "cut") for (const id of u.layers) { const L = layerById(id); if (L) { L.cuts.pop(); requestSurface(L); } }
   else if (u.type === "cuts") for (const c of u.list) { const L = layerById(c.layer); if (L) { L.cuts = c.cuts; requestSurface(L); } }
   else if (u.type === "shift") setShift(u.old, false);
@@ -493,15 +509,15 @@ function exportLayer(fmt) {
   const it = itemOf(L), st = it.structure, reps = st.pbc ? S.reps : [1, 1, 1];
   const sh = shownStructure(st, S.t, reps), pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0];
   const note = [S.t.some(x => Math.abs(x) > 1e-9) ? `shifted by ${f.map(x => +x.toFixed(4)).join(" ")}` : "", reps.some(r => r > 1) ? `${reps.join("x")} supercell` : ""].filter(Boolean).join(", ");
-  const title = `${it.name} (isoview${note ? ", " + note : ""})`;
+  const title = `${it.name}${it.traj ? ` frame ${frameOf(it) + 1}` : ""} (isoview${note ? ", " + note : ""})`;
   const txt = fmt === "cif" ? toCIF(sh, title) : fmt === "xyz" ? toXYZ(sh, title) : toPOSCAR(sh, [0, 0, 0], title);
   const ext = { cif: ".cif", xyz: ".xyz" }[fmt] || ".vasp";
   download(txt, it.name.split(" + ")[0].replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") + "_isoview" + ext);
   toast(`Exported ${sh.species.length} atoms as ${fmt === "cif" ? "CIF" : fmt === "xyz" ? "extended XYZ" : "POSCAR"}${note ? " (" + note + ")" : ""}.`, false, 4000);
 }
-function download(text, name) {
+function download(data, name) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: "text/plain" }));
   a.download = name;
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -516,7 +532,8 @@ function derive(kind) {
   try { res = kind === "primitive" ? primitive(st, tol) : conventional(st, tol); }
   catch (e) { return toast(e.message || String(e), true); }
   if (kind === "primitive" && res.n === 1) return toast(`Already primitive: no lattice translations within ${tol} Å besides the cell's own.`, false, 6000);
-  const nit = { id: nextItem++, name: `${kind} of ${it.name}`, ds: null, structure: res.structure, wave: null, fields: [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" } };
+  if (kind === "conventional" && sameCellShape(st, res.structure, tol)) return toast(`Already the conventional ${res.system} cell (${st.species.length} atoms).`, false, 6000);
+  const nit = { id: nextItem++, name: `${kind} of ${it.name}${it.traj ? ` (frame ${frameOf(it) + 1})` : ""}`, ds: null, structure: res.structure, wave: null, fields: [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" } };
   S.items.set(nit.id, nit);
   const NL = { id: nextLayer++, item: nit.id, kind: "atoms", visible: true };
   S.layers.splice(S.layers.indexOf(L) + 1, 0, NL);
@@ -527,6 +544,190 @@ function derive(kind) {
   buildLayersUI(); updateChrome(); buildStructure(); refit(); syncShiftInputs();
   const what = kind === "primitive" ? `primitive cell (${res.structure.species.length} atoms, ${res.n} lattice points in the original)` : `conventional ${res.system} cell (${res.structure.species.length} atoms, ${res.z}× the primitive)`;
   toast(`Added the ${what} as a new layer; the original is hidden.`, false, 7000, { label: "Undo", fn: undo });
+}
+
+/* ------------------------------------------------------------------ trajectories */
+const trajItems = () => [...S.items.values()].filter(it => it.traj && S.layers.some(L => L.item === it.id));
+const maxFrames = () => trajItems().reduce((m, it) => Math.max(m, it.traj.n), 0);
+const frameOf = it => Math.min(S.frame, it.traj.n - 1);
+/** The trajectory the panel describes: the chosen atoms layer if it is one, else the first. */
+const mainTraj = () => { const L = activeAtomsLayer(), it = L && itemOf(L); return it && it.traj ? it : trajItems()[0] || null; };
+/** Put frame S.frame (clamped) of a trajectory item into its structure: positions of the atoms it still has
+ *  (structure.ids, 1-based numbers in the file) and the frame's cell when the cell changes. */
+function applyFrame(it) {
+  const t = it.traj;
+  if (!t) return;
+  const f = frameOf(it), st = it.structure, ids = st.ids, N = st.species.length, base = 3 * t.nat * f, pos = new Float64Array(3 * N);
+  for (let i = 0; i < N; i++) { const j = 3 * (ids ? ids[i] - 1 : i); pos[3 * i] = t.pos[base + j]; pos[3 * i + 1] = t.pos[base + j + 1]; pos[3 * i + 2] = t.pos[base + j + 2]; }
+  const lattice = t.cells ? [0, 1, 2].map(r => Array.from(t.cells.subarray(9 * f + 3 * r, 9 * f + 3 * r + 3))) : st.lattice;
+  it.structure = { ...st, pos, lattice };
+}
+/** Show frame f (clamped to the longest trajectory) in every trajectory. */
+function setFrame(f) {
+  const n = maxFrames();
+  if (!n) return;
+  S.frame = Math.max(0, Math.min(n - 1, Math.round(f)));
+  for (const it of trajItems()) applyFrame(it);
+  buildStructure(); updatePlayer();
+}
+let playLast = 0, playDir = 1;
+function play(on) {
+  const n = maxFrames();
+  S.playing = !!on && n > 1;
+  if (S.playing && S.loop === "once" && S.frame >= n - 1) setFrame(0);
+  if (S.playing) { playLast = performance.now(); requestAnimationFrame(tick); }
+  updatePlayer();
+}
+function tick(t) {
+  if (!S.playing) return;
+  const dt = 1000 / S.fps;
+  if (t - playLast >= dt) {
+    // WHY: keep the phase (no drift); if drawing falls far behind, restart the clock instead of racing to catch up
+    playLast = t - playLast > 4 * dt ? t : playLast + dt;
+    advance();
+  }
+  if (S.playing) requestAnimationFrame(tick);
+}
+/** Next frame of the playback: S.step frames on, then loop, bounce or stop at either end. */
+function advance() {
+  const n = maxFrames();
+  let f = S.frame + playDir * S.step;
+  if (f > n - 1 || f < 0) {
+    if (S.loop === "loop") f = playDir > 0 ? 0 : n - 1;
+    else if (S.loop === "bounce") { playDir = -playDir; f = Math.max(0, Math.min(n - 1, S.frame + playDir * S.step)); }
+    else { f = Math.max(0, Math.min(n - 1, f)); setFrame(f); play(false); return; }
+  }
+  setFrame(f);
+}
+function updatePlayer() {
+  const n = maxFrames(), on = n > 1;
+  $("player").hidden = !on; document.body.classList.toggle("has-player", on);
+  $("sec-traj").hidden = !on;
+  if (!on) return;
+  const sl = $("pl-frame");
+  sl.max = n - 1; sl.value = S.frame;
+  const it = mainTraj(), E = it && it.traj.energy, e = E ? E[frameOf(it)] : NaN;
+  $("pl-count").textContent = `${S.frame + 1} / ${n}${Number.isFinite(e) ? ` · ${e.toFixed(4)} eV` : ""}`;
+  $("pl-play").setAttribute("aria-pressed", String(S.playing));
+  const pt = S.playing ? "Pause (Space)" : "Play (Space)";
+  $("pl-play").title = pt; $("pl-play").setAttribute("aria-label", pt);
+  $("sum-traj").textContent = `${S.frame + 1} / ${n}${S.playing ? " · playing" : ""}`;
+  if (it) $("tr-info").textContent = `${it.traj.n} of ${it.name}${it.traj.cells ? " · cell changes" : ""}`;
+  drawSpark();
+  movieNote();
+}
+/** Energy per frame of the main trajectory as a line; the current frame is marked; a click goes to that frame. */
+function drawSpark() {
+  const it = mainTraj(), E = it && it.traj.energy, box = $("tr-spark");
+  box.hidden = !E;
+  if (!E) return;
+  const svg = $("tr-svg"), W = svg.clientWidth || 280, H = 52, n = E.length;
+  let lo = Infinity, hi = -Infinity;
+  for (const e of E) if (Number.isFinite(e)) { if (e < lo) lo = e; if (e > hi) hi = e; }
+  const span = hi - lo || 1, X = f => 3 + (W - 6) * (n > 1 ? f / (n - 1) : 0.5), Y = e => 5 + (H - 10) * (hi - e) / span;
+  let d = "";
+  for (let f = 0; f < n; f++) if (Number.isFinite(E[f])) d += `${d ? "L" : "M"}${X(f).toFixed(1)} ${Y(E[f]).toFixed(1)}`;
+  const f0 = frameOf(it), e0 = E[f0];
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<line class="base" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/><path class="ln" d="${d}"/>` + (Number.isFinite(e0) ? `<circle class="now" cx="${X(f0).toFixed(1)}" cy="${Y(e0).toFixed(1)}" r="3.5"/>` : "");
+  $("tr-e-range").textContent = `E ${lo.toFixed(4)} … ${hi.toFixed(4)} eV`;
+  $("tr-e-now").textContent = Number.isFinite(e0) ? `frame ${f0 + 1}: ${(e0 - lo).toFixed(4)} eV above min` : `frame ${f0 + 1}`;
+}
+const sparkFrame = e => { const it = mainTraj(), svg = $("tr-svg"), r = svg.getBoundingClientRect(), W = r.width || 280; return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left - 3) / (W - 6))) * (it.traj.n - 1)); };
+function videoMime() {
+  if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) return null;
+  for (const m of ["video/mp4;codecs=avc1.640028", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]) {
+    try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+/** Frames the movie will contain: from..to (1-based inputs) every S.step frames. */
+function movieFrames() {
+  const n = maxFrames(), a = Math.max(1, Math.min(n, +$("mv-from").value || 1)), b = Math.max(a, Math.min(n, +$("mv-to").value || n)), list = [];
+  for (let f = a - 1; f <= b - 1; f += S.step) list.push(f);
+  return list;
+}
+const movieSize = () => { const s = S.movie.scale, v = S.movie.fmt === "video"; let w = Math.max(2, Math.round(canvas.width * s)), h = Math.max(2, Math.round(canvas.height * s)); if (v) { w -= w % 2; h -= h % 2; } return [w, h]; };
+function movieNote() {
+  if (S.exporting) return;
+  const list = movieFrames(), fps = Math.max(1, Math.min(60, +$("mv-fps").value || S.fps)), [w, h] = movieSize(), mime = videoMime();
+  const ext = !mime ? "" : mime.includes("mp4") ? "MP4" : "WebM";
+  $("mfmt-video").hidden = !mime;
+  if (S.movie.fmt === "video" && !mime) S.movie.fmt = "gif";
+  $("mv-go").textContent = S.movie.fmt === "gif" ? "Export GIF" : `Export ${ext}`;
+  const capped = S.movie.fmt === "gif" && fps > 50 ? " (GIF plays at most 50 fps)" : "";
+  $("mv-note").textContent = `${list.length} frame${list.length === 1 ? "" : "s"} · ${(list.length / fps).toFixed(1)} s at ${fps} fps${capped} · ${w} × ${h} px${S.movie.fmt === "video" ? " · recorded in real time" : ""}`;
+}
+/** Render the chosen frames and save them as an animated GIF or a video (the export button cancels while it runs). */
+async function exportMovie() {
+  if (S.exporting) { S.exporting.cancel = true; return; }
+  if (!R || maxFrames() < 2) return;
+  const list = movieFrames(), fps = Math.max(1, Math.min(60, +$("mv-fps").value || S.fps)), gif = S.movie.fmt === "gif";
+  const [W, H] = movieSize(), keep = S.frame, wasPlaying = S.playing, job = { cancel: false };
+  play(false); S.exporting = job;
+  const btn = $("mv-go"); btn.classList.add("busy");
+  const c2 = document.createElement("canvas"); c2.width = W; c2.height = H;
+  const g = c2.getContext("2d", { willReadFrequently: gif }), bg = css("--bg") || "#ffffff";
+  const grab = f => { setFrame(f); frame(); g.fillStyle = bg; g.fillRect(0, 0, W, H); g.drawImage(canvas, 0, 0, W, H); };
+  const name = (mainTraj().name.split(" + ")[0] || "isoview").replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_");
+  const yieldNow = () => new Promise(r => setTimeout(r, 0));
+  try {
+    if (gif) {
+      const picks = [...new Set([0, 0.2, 0.4, 0.6, 0.8, 1].map(q => list[Math.round(q * (list.length - 1))]))], samples = [];
+      for (const f of picks) { grab(f); samples.push(g.getImageData(0, 0, W, H).data); }
+      const enc = new GifWriter(W, H, buildPalette(samples));
+      let acc = 0;
+      for (let k = 0; k < list.length; k++) {
+        if (job.cancel) throw new Error("cancelled");
+        grab(list[k]);
+        acc += 100 / fps; const d = Math.max(2, Math.round(acc)); acc -= d;
+        enc.frame(g.getImageData(0, 0, W, H).data, d);
+        btn.textContent = `Cancel (${Math.round(100 * (k + 1) / list.length)}%)`;
+        if (k % 2 === 1) await yieldNow();
+      }
+      const bytes = enc.finish();
+      download(new Blob([bytes], { type: "image/gif" }), `${name}.gif`);
+      toast(`Saved a GIF: ${list.length} frames, ${W} × ${H} px, ${(bytes.length / 1048576).toFixed(1)} MB.`, false, 5000);
+    } else {
+      const mime = videoMime(), stream = c2.captureStream(0), track = stream.getVideoTracks()[0];
+      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(Math.min(2.5e7, Math.max(2e6, 0.2 * W * H * fps))) });
+      const chunks = [], stopped = new Promise(r => (rec.onstop = r));
+      rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      grab(list[0]); rec.start();
+      const t0 = performance.now();
+      for (let k = 0; k < list.length; k++) {
+        if (job.cancel) { rec.stop(); await stopped; throw new Error("cancelled"); }
+        grab(list[k]);
+        if (track.requestFrame) track.requestFrame();
+        btn.textContent = `Cancel (${Math.round(100 * (k + 1) / list.length)}%)`;
+        const wait = t0 + (k + 1) * 1000 / fps - performance.now();
+        await new Promise(r => setTimeout(r, Math.max(0, wait)));
+      }
+      rec.stop(); await stopped;
+      const blob = new Blob(chunks, { type: mime.split(";")[0] });
+      download(blob, `${name}.${mime.includes("mp4") ? "mp4" : "webm"}`);
+      toast(`Saved a video: ${list.length} frames at ${fps} fps, ${W} × ${H} px, ${(blob.size / 1048576).toFixed(1)} MB.`, false, 5000);
+    }
+  } catch (e) { if (e.message !== "cancelled") toast(`Could not make the movie: ${e.message || e}`, true); else toast("Movie export cancelled.", false, 2500); }
+  finally {
+    S.exporting = null; btn.classList.remove("busy");
+    setFrame(keep); movieNote();
+    if (wasPlaying) play(true);
+  }
+}
+/** Every frame (at the playback step) of the chosen trajectory as extended XYZ, shift, deletions and supercell applied. */
+function exportFrames() {
+  const it = mainTraj();
+  if (!it) return;
+  const keep = S.frame, reps = it.structure.pbc ? S.reps : [1, 1, 1], parts = [];
+  for (let f = 0; f < it.traj.n; f += S.step) {
+    S.frame = f; applyFrame(it);
+    const e = it.traj.energy ? it.traj.energy[f] : NaN;
+    parts.push(toXYZ(shownStructure(it.structure, S.t, reps), `${it.name} frame ${f + 1}`, Number.isFinite(e) ? { energy: e } : {}));
+  }
+  S.frame = keep; applyFrame(it);
+  download(parts.join(""), (it.name.split(" + ")[0] || "isoview").replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") + "_frames.xyz");
+  toast(`Exported ${parts.length} frames as extended XYZ.`, false, 4000);
 }
 
 /* ------------------------------------------------------------------ label mode */
@@ -701,7 +902,7 @@ function buildLayersUI() {
   const box = $("layers"), aa = activeAtomsLayer();
   box.innerHTML = S.layers.map(L => {
     const it = itemOf(L), f = L.kind === "field" ? it.fields[L.fi] : null;
-    const kind = L.kind === "atoms" ? `${it.structure.species.length} atoms` : f ? f.name : it.wave ? "orbital" : "field";
+    const kind = L.kind === "atoms" ? `${it.structure.species.length} atoms${it.traj ? ` · ${it.traj.n} frames` : ""}` : f ? f.name : it.wave ? "orbital" : "field";
     const signed = f && f.kind === "signed";
     const sw = L.kind === "field" ? `<input type="color" class="cpos" value="${L.pos}" aria-label="Surface colour">${signed ? `<input type="color" class="cneg" value="${L.neg}" aria-label="Negative surface colour">` : ""}` : "";
     const act = L.id === S.active || (L.kind === "atoms" && aa && L.id === aa.id);
@@ -770,13 +971,14 @@ async function openFiles(list, mode = "auto") {
       const w = [...S.items.values()].find(it => it.wave && !it.structure);
       if (w && !d.fields.length && !d.wave && d.structure && sameCell(d.structure.lattice, w.wave.lattice)) add = true;
     }
-    await addItem({ name: files.map(f => f.name).join(" + "), ...d }, add);
+    await addItem({ name: files.map(f => f.name).join(" + "), ...d, files }, add);
   } catch (e) { toast(e.message || String(e), true, 8000); console.error(e); }
   finally { busy(false); }
 }
 function clearScene() {
   for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
   S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
+  S.frame = 0; S.playing = false;
   S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
   if (R) R.clearMeshes();
@@ -787,11 +989,12 @@ function sameAtoms(a, b) {
   for (let i = 0; i < a.pos.length; i++) if (Math.abs(a.pos[i] - b.pos[i]) > 1e-3) return false;
   return a.species.every((s, i) => s === b.species[i]);
 }
-async function addItem(d, adding) {
+async function addItem(d, adding, quiet = false) {
   if (!(await ensureRenderer())) return;
   if (!adding) clearScene();
   const notes = [...(d.notes || [])];
-  const it = { id: nextItem++, name: d.name, ds: d.ds, structure: d.structure, wave: d.wave || null, fields: d.fields || [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" } };
+  const it = { id: nextItem++, name: d.name, ds: d.ds, structure: d.structure, wave: d.wave || null, traj: d.traj || null, fields: d.fields || [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" },
+    key: d.key || Math.random().toString(36).slice(2) + Date.now().toString(36), files: d.files || null, example: d.example || null, kept: false };
   if (it.wave && !(it.structure && sameCell(it.structure.lattice, it.wave.lattice))) {
     if (it.structure) notes.push("the structure's cell differs from the WAVECAR's, so only the cell is drawn");
     else if (!atomLayers(false).length) notes.push("add the matching POSCAR or CONTCAR to draw the atoms");
@@ -799,6 +1002,7 @@ async function addItem(d, adding) {
   }
   if (it.structure && !it.structure.species.length && !it.fields.length && !it.wave) throw new Error("No atoms or data found in that file.");
   S.items.set(it.id, it);
+  if (d.alreadyKept) it.kept = true; else keepFiles(it);
   if (it.structure && it.structure.species.length) {
     const dup = adding && atomLayers().some(L => sameAtoms(itemOf(L).structure, it.structure));
     S.layers.push({ id: nextLayer++, item: it.id, kind: "atoms", visible: !dup });
@@ -814,6 +1018,7 @@ async function addItem(d, adding) {
   }
   S.atlas = buildAtlas(atlasSpecies());
   $("empty").hidden = true;
+  if (it.traj) { applyFrame(it); $("mv-to").value = maxFrames(); $("mv-from").max = $("mv-to").max = maxFrames(); }
   buildLayersUI(); updateChrome(); buildStructure();
   if (!adding) resetView(); else refit();
   for (const id of ["sec-structure", "sec-surface", "sec-orbital", "sec-view"]) $(id).open = false;
@@ -822,13 +1027,128 @@ async function addItem(d, adding) {
   syncFieldUI(); syncShiftInputs();
   if (FL && it.wave) { if (!adding) $("sec-orbital").open = true; await showBand(FL, Math.max(0, it.wave.frontier[0][0].homo)); }
   else if (FL) { if (!adding) $("sec-surface").open = true; requestSurface(FL); }
-  if (notes.length) toast(notes.join("; "), false, 7000);
+  else if (it.traj && !adding) $("sec-traj").open = true;
+  if (notes.length && !quiet) toast(notes.join("; "), false, 7000);
+}
+
+/* ------------------------------------------------------------------ the scene kept in this browser (store.js) */
+let saveTimer = 0, restoring = false;
+/** Store an item's files once, while the scene's kept files stay within store.LIMIT bytes. */
+function keepFiles(it) {
+  if (!it.files || !it.files.length) return;
+  const used = [...S.items.values()].reduce((a, o) => a + (o.kept ? o.files.reduce((b, f) => b + f.size, 0) : 0), 0);
+  const size = it.files.reduce((a, f) => a + f.size, 0);
+  if (used + size > store.LIMIT) return;
+  it.kept = true;
+  store.putFiles(it.key, it.files).then(r => { if (!r) it.kept = false; });
+}
+function saveSoon() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  // WHY: prune by every item still in memory (a removed layer can come back with Undo), not only the shown ones
+  saveTimer = setTimeout(() => { if (!restoring && !S.exporting) store.putState(serialize()).then(() => store.pruneFiles(new Set([...S.items.values()].filter(i => i.kept).map(i => i.key)))); }, 700);
+}
+/** The scene as plain data. Items keep their key and name; an item whose files are not kept (too large), a derived
+ *  cell and an edited structure also carry the structure (a trajectory carries only the ids of its atoms).
+ *  withFiles adds the File objects themselves (for New scene's Undo, in memory). */
+function serialize(withFiles = false) {
+  const items = [...S.items.values()].filter(it => S.layers.some(L => L.item === it.id));
+  const index = new Map(items.map((it, k) => [it.id, k]));
+  const state = {
+    v: 1, saved: Date.now(),
+    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, w: it.w, hadFiles: !!(it.files && it.files.length),
+      structure: it.structure && (!it.kept && !it.example || it.structure.ids) && !(it.traj && it.kept) ? it.structure : null,
+      ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
+    layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts } : {}) })),
+    view: { style: S.style, look: S.look, scale: S.scale, bonds: S.bonds, tol: S.tol, cell: S.cell, reps: S.reps.slice(), boundary: S.boundary, res: S.res, proj: S.proj, t: S.t.slice(),
+      frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
+      labels: S.labels.map(l => ({ layer: S.layers.findIndex(L => L.id === l.layer), src: l.src, p: l.p })) },
+    cam: { q: cam.q.slice(), dist: cam.dist, radius: cam.radius, target: cam.target.slice() },
+  };
+  if (withFiles) state.files = Object.fromEntries(items.filter(it => it.files).map(it => [it.key, it.files]));
+  return state;
+}
+/** Write the view settings into the controls. */
+function syncControls() {
+  $("scale").value = S.scale; $("bonds").checked = S.bonds; $("row-tol").hidden = !S.bonds; $("tol").value = S.tol; $("tol-out").textContent = S.tol.toFixed(2);
+  $("cell").checked = S.cell; ["ra", "rb", "rc"].forEach((id, i) => ($(id).value = S.reps[i])); $("boundary").checked = S.boundary;
+  cam.ortho = S.proj === "ortho";
+  $("tr-fps").value = S.fps; $("tr-fps-out").textContent = `${S.fps} fps`; $("mv-fps").value = S.fps; $("tr-step").value = S.step;
+  segState(); syncShiftInputs();
+}
+/** Rebuild a scene from serialize() output; files(key) gives an item's File objects, from storage (stored: they are
+ *  kept already) or from memory (New scene's Undo: they are stored again). */
+async function restoreScene(st, files, stored = true) {
+  if (!st || st.v !== 1 || !st.items || !st.items.length) return false;
+  restoring = true; busy(true);
+  const missing = [], made = [];
+  try {
+    if (!(await ensureRenderer())) return false;
+    clearScene();
+    Object.assign(S, { style: st.view.style, look: LOOKS[st.view.look] ? st.view.look : "classic", scale: st.view.scale, bonds: st.view.bonds, tol: st.view.tol, cell: st.view.cell, reps: st.view.reps.slice(), boundary: st.view.boundary,
+      res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop" });
+    syncControls();
+    for (const sp of st.items) {
+      let d = null;
+      try {
+        if (sp.example === "h3d") d = await call("example", { name: "h3d" });
+        else if (sp.kept) { const f = await files(sp.key); if (f && f.length) d = { ...(await call("open", { files: f })), files: f }; }
+        if (!d && sp.structure) d = { ds: null, structure: sp.structure, fields: [], wave: null, traj: null, notes: [] };
+      } catch (e) { d = null; }
+      if (!d) { missing.push(sp.name); made.push(null); continue; }
+      await addItem({ ...d, name: sp.name, key: sp.key, example: sp.example, alreadyKept: stored && sp.kept }, true, true);
+      const it = [...S.items.values()].pop();
+      if (sp.structure && !it.traj) it.structure = sp.structure;
+      if (it.traj && sp.ids) { const n = sp.ids.length, ids = sp.ids; it.structure = { ...it.structure, species: Array.from(ids, id => it.traj && d.structure.species[id - 1]), ids, pos: new Float64Array(3 * n) }; }
+      if (sp.hadFiles && !sp.kept) missing.push(sp.name + " (atoms only: its files were too large to keep)");
+      made.push(it);
+    }
+    // layers in the stored order, with their settings; layers the user had removed stay removed
+    const order = [];
+    for (const ls of st.layers) {
+      const it = made[ls.item];
+      if (!it) continue;
+      const L = S.layers.find(l => l.item === it.id && l.kind === ls.kind && !order.includes(l));
+      if (!L) continue;
+      L.visible = ls.visible;
+      if (L.kind === "field") Object.assign(L, { fi: Math.min(ls.fi, Math.max(0, it.fields.length - 1)), iso: ls.iso, p: ls.p, mode: ls.mode, pm: ls.pm, opacity: ls.opacity, pos: ls.pos, neg: ls.neg, cuts: ls.cuts || [] });
+      order.push(L);
+    }
+    for (const L of S.layers) if (!order.includes(L) && L.kind === "field") R.removeMeshGroup(L.id);
+    S.layers = order;
+    const at = i => (i >= 0 && order[i] ? order[i].id : null);
+    S.active = at(st.view.active) ?? (fieldLayers()[0] || {}).id ?? null; S.activeAtoms = at(st.view.activeAtoms);
+    S.frame = st.view.frame || 0;
+    for (const it of trajItems()) applyFrame(it);
+    S.labels = (st.view.labels || []).filter(l => order[l.layer]).map(l => ({ i: -1, layer: order[l.layer].id, src: l.src, p: l.p }));
+    if (!S.layers.length) { showHome(); return false; }
+    for (const it of made) if (it && it.wave) {
+      const sp = st.items[made.indexOf(it)], FL = S.layers.find(L => L.item === it.id && L.kind === "field");
+      if (FL && sp.w && sp.w.b >= 0 && (sp.w.b !== it.w.b || sp.w.s !== it.w.s || sp.w.k !== it.w.k || sp.w.mode !== it.w.mode)) { it.w = { ...sp.w }; await showBand(FL, sp.w.b); }
+    }
+    S.atlas = buildAtlas(atlasSpecies());
+    buildLayersUI(); updateChrome(); buildStructure(); syncFieldUI(); syncControls();
+    for (const L of fieldLayers()) requestSurface(L);
+    Object.assign(cam, { q: st.cam.q.slice(), dist: st.cam.dist, radius: st.cam.radius, target: st.cam.target.slice() });
+    $("empty").hidden = true;
+    requestRender();
+    if (missing.length) toast(`Restored the last scene; not kept: ${missing.join(", ")}.`, false, 8000);
+    return true;
+  } catch (e) { console.error(e); toast(`Could not restore the last scene: ${e.message || e}`, true); return false; }
+  finally { restoring = false; busy(false); saveSoon(); }
+}
+/** Clear the scene and the kept copy, back to the opening page; Undo rebuilds it from memory. */
+function newScene() {
+  const snap = S.layers.length ? serialize(true) : null;
+  clearScene(); buildLayersUI(); updateChrome(); showHome();
+  store.clearAll();
+  if (snap) toast("Started a new scene.", false, 8000, { label: "Undo", fn: () => restoreScene(snap, k => (snap.files || {})[k] || null, false) });
 }
 
 /* ------------------------------------------------------------------ chrome */
 function updateChrome() {
   const has = S.layers.length > 0;
-  $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has;
+  $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has; $("btn-new").hidden = !has;
   for (const b of document.querySelectorAll(".corner-eye")) b.hidden = !has;
   const pc = primaryCell();
   for (const el of document.querySelectorAll(".pbc")) el.hidden = !(pc && pc.pbc);
@@ -837,7 +1157,7 @@ function updateChrome() {
   $("doc-name").textContent = names.join(" + ");
   const al = atomLayers();
   $("doc-sub").textContent = al.length === 1 ? formula(itemOf(al[0]).structure.species) : al.length > 1 ? `${al.length} structures` : "";
-  updateTools(); updateEdit();
+  updateTools(); updateEdit(); updatePlayer();
   updateInfo(); summaries(); segState();
 }
 function updateInfo() {
@@ -848,11 +1168,12 @@ function updateInfo() {
     info += `${info ? " · " : ""}${p.slice(0, 3).map(x => x.toFixed(3)).join(" ")} Å · ${p.slice(3).map(x => x.toFixed(2)).join(" ")}° · ${Math.abs(det3(pc.L)).toFixed(1)} Å³`;
   }
   if (pc && S.t.some(x => Math.abs(x) > 1e-9)) info += ` · shifted by ${fracShift(pc.L).map(x => +x.toFixed(4)).join(" ")}`;
+  if (maxFrames() > 1) info += ` · frame ${S.frame + 1} / ${maxFrames()}`;
   $("info").textContent = info;
 }
 function summaries() {
   const pc = primaryCell();
-  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}`;
+  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== "classic" ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}`;
   const L = activeField(), f = activeStats();
   $("sum-surface").textContent = !L || !f ? "" : !L.visible ? "hidden" : L.mode === "log" ? `${fmt(L.iso)} · ${Math.round(100 * fractionAbove(f.stats, L.iso))}%` : fmt(L.iso);
   const aw = activeWave();
@@ -861,7 +1182,7 @@ function summaries() {
 }
 function segState() {
   const aw = activeWave(), w = aw ? aw.it.w : { s: 0, mode: "density", half: "x" };
-  const val = { style: S.style, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme };
+  const val = { style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
   for (const seg of document.querySelectorAll(".seg")) for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === val[seg.dataset.key]));
 }
 
@@ -877,7 +1198,7 @@ async function example(id) {
   try {
     if (id === "h3d") {
       if (!(await ensureRenderer())) return;
-      await addItem({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })) }, false);
+      await addItem({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })), example: "h3d" }, false);
       return;
     }
     const url = { rutile: "examples/rutile-TiO2.cif", graphene: "examples/graphene.pw.in" }[id];
@@ -926,6 +1247,7 @@ function bindSeg(key, fn) {
   document.querySelector(`.seg[data-key="${key}"]`).addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
 }
 bindSeg("style", v => { S.style = v; buildStructure(); });
+bindSeg("look", v => { S.look = v; requestRender(); });
 bindSeg("res", v => { S.res = v; refreshSurfaces(); });
 bindSeg("proj", v => { S.proj = v; cam.ortho = v === "ortho"; requestRender(); });
 bindSeg("theme", v => {
@@ -934,6 +1256,9 @@ bindSeg("theme", v => {
   try { localStorage.setItem("isoview-theme", v); } catch (e) { /* storage unavailable */ }
   restyle();
 });
+bindSeg("loop", v => { S.loop = v; playDir = 1; });
+bindSeg("mfmt", v => { S.movie.fmt = v; if (v === "video" && S.movie.scale < 0.5) S.movie.scale = 1; movieNote(); });
+bindSeg("msize", v => { S.movie.scale = +v; movieNote(); });
 bindSeg("wspin", v => { const aw = activeWave(); if (!aw) return; aw.it.w.s = +v; buildBands(aw.it); showBand(aw.L, Math.max(0, aw.it.w.b)); });
 bindSeg("wmode", v => { const aw = activeWave(); if (!aw) return; aw.it.w.mode = v; showBand(aw.L, Math.max(0, aw.it.w.b)); });
 bindSeg("half", v => { const aw = activeWave(); if (!aw) return; aw.it.w.half = v; showBand(aw.L, Math.max(0, aw.it.w.b)); });
@@ -993,6 +1318,15 @@ $("btn-snap").addEventListener("click", snapshot);
 $("btn-home").addEventListener("click", showHome);
 $("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
 $("e-region").addEventListener("click", () => setBoxMode(!S.boxMode));
+$("pl-play").addEventListener("click", () => play(!S.playing));
+$("pl-frame").addEventListener("input", e => setFrame(+e.target.value));
+$("tr-fps").addEventListener("input", e => { S.fps = +e.target.value; $("tr-fps-out").textContent = `${S.fps} fps`; $("mv-fps").value = S.fps; movieNote(); });
+$("tr-step").addEventListener("change", e => { S.step = Math.max(1, Math.round(+e.target.value) || 1); e.target.value = S.step; $("tr-step-u").textContent = S.step > 1 ? `${["", "", "2nd", "3rd"][S.step] || S.step + "th"} frame` : "frame"; movieNote(); });
+for (const id of ["mv-fps", "mv-from", "mv-to"]) $(id).addEventListener("change", movieNote);
+$("mv-go").addEventListener("click", exportMovie);
+$("tr-xyz").addEventListener("click", exportFrames);
+$("tr-svg").addEventListener("click", e => { if (mainTraj()) setFrame(sparkFrame(e)); });
+$("sec-traj").addEventListener("toggle", () => { if ($("sec-traj").open) drawSpark(); });
 $("e-delete").addEventListener("click", deleteSelected);
 $("e-cut").addEventListener("click", cutSurface);
 $("e-center").addEventListener("click", centerOnSelected);
@@ -1001,6 +1335,7 @@ $("sel-clear2").addEventListener("click", clearSelection);
 $("label-done").addEventListener("click", () => setLabelMode(false));
 $("label-clear").addEventListener("click", () => { S.labels = []; uploadLabels(); requestRender(); });
 $("btn-back").addEventListener("click", () => { $("empty").hidden = true; });
+$("btn-new").addEventListener("click", newScene);
 let fileMode = "replace";
 const pick = mode => { fileMode = mode; $("file").click(); };
 $("btn-open2").addEventListener("click", () => pick("replace"));
@@ -1029,7 +1364,7 @@ window.addEventListener("paste", e => {
   if (t && t.trim()) openFiles([new File([t], "pasted")], S.layers.length ? "add" : "replace");
 });
 window.addEventListener("keydown", e => {
-  if (e.target && e.target.closest && e.target.closest("input, select, textarea")) return;
+  if (e.target && e.target.closest && e.target.closest("input, select, textarea, .bands")) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1047,6 +1382,9 @@ window.addEventListener("keydown", e => {
   else if (k === "s") snapshot();
   else if (k === "l") setLabelMode(!S.labelMode);
   else if (k === "h") tuckAll();
+  else if (k === " " && maxFrames() > 1) { e.preventDefault(); play(!S.playing); }
+  else if ((k === "arrowright" || k === "arrowleft") && maxFrames() > 1) { e.preventDefault(); play(false); setFrame(S.frame + (k === "arrowright" ? 1 : -1) * S.step * (e.shiftKey ? 10 : 1)); }
+  else if ((k === "home" || k === "end") && maxFrames() > 1) { e.preventDefault(); play(false); setFrame(k === "home" ? 0 : maxFrames() - 1); }
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
@@ -1062,3 +1400,4 @@ if (qp.get("url")) {
     .then(b => openFiles([new File([b], decodeURIComponent(u.split(/[?#]/)[0].split("/").pop() || "file"))], "replace"))
     .catch(e => toast(`Could not fetch ${u}: ${e.message}. The server must allow cross-origin requests.`, true, 9000));
 } else if (qp.get("example")) example(qp.get("example"));
+else store.getState().then(st => { if (st && !S.layers.length) restoreScene(st, store.getFiles); });

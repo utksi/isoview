@@ -189,6 +189,22 @@ function along(B, u) {
 const ang = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(a, b) / (norm(a) * norm(b))))) * 180 / Math.PI;
 const rightHanded = C => (det3(C) < 0 ? [C[0], C[1], C[2].map(x => -x)] : C);
 
+/**
+ * True if structures a and b have the same number of atoms and the same cell up to relabelling the axes and flipping
+ * a vector: equal volume (relative 1e-4), equal sorted lengths (within tol, A) and equal sorted angles taken as
+ * min(theta, 180 - theta) (within 0.05 degrees). Used to tell that a cell already is the conventional one.
+ */
+export function sameCellShape(a, b, tol = 0.01) {
+  if (!a.lattice || !b.lattice || a.species.length !== b.species.length) return false;
+  const pa = cellParams(a.lattice), pb = cellParams(b.lattice);
+  const va = Math.abs(det3(a.lattice)), vb = Math.abs(det3(b.lattice));
+  return Math.abs(va - vb) < 1e-4 * va && pa.len.every((x, i) => Math.abs(x - pb.len[i]) < tol) && pa.ang.every((x, i) => Math.abs(x - pb.ang[i]) < 0.05);
+}
+function cellParams(L) {
+  const len = L.map(norm), an = [[1, 2], [0, 2], [0, 1]].map(([i, j]) => { const t = ang(L[i], L[j]); return Math.min(t, 180 - t); });
+  return { len: len.sort((x, y) => x - y), ang: an.sort((x, y) => x - y) };
+}
+
 /** Conventional cell: { structure, system, z } (z = conventional / primitive volume). */
 export function conventional(st, tol = 0.01) {
   const prim = primitive(st, tol).structure;

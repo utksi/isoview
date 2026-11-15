@@ -13,6 +13,7 @@ files are read on your device and never uploaded.
 | Structures | POSCAR / CONTCAR (VASP 4 and 5+), CIF (symmetry operations applied), XSF, Quantum ESPRESSO `pw.x` input (all `ibrav`, every unit option), cube, xyz / extended xyz, FHI-aims `geometry.in` |
 | Volumetric | CHGCAR, CHG, PARCHG, AECCAR (as e/Å³; spin-polarised files give total, magnetization, up, down), LOCPOT (eV), ELFCAR, XSF `DATAGRID_3D`, Gaussian cube |
 | Wavefunctions | WAVECAR from `vasp_std`, `vasp_gam` and `vasp_ncl`: pick spin, k-point and band, and see \|ψ\|² (or ψ itself for Γ-only builds) |
+| Trajectories | XDATCAR (fixed or changing cell), OUTCAR and vasprun.xml (every ionic step, with its energy), ASE `.traj`, xyz / extended xyz (several frames, `energy=`), animated XSF (AXSF), LAMMPS text dumps (orthogonal or triclinic box; element, mass or type columns), Quantum ESPRESSO `pw.x` output (relax, md, vc-relax), PDB with MODELs, GROMACS `.gro`, CASTEP `.md` / `.geom` |
 
 Drop several files at once to combine them, e.g. a `WAVECAR` with its `CONTCAR`. You can also paste a structure
 as text, or link to a file with `?url=https://...` (the host must allow cross-origin requests).
@@ -31,7 +32,7 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   different runs. Each field layer has its own level, opacity and colours; layers can be hidden or removed.
   Under the list, for the chosen structure (click its row):
   - **Primitive cell** and **Conventional cell** add the reduced cell as a new layer (the original is hidden, and
-    Undo removes it). Both work from supercells: a 3×3×3 rock-salt supercell gives the 2-atom primitive and the
+    Undo removes it); a cell that already is primitive or conventional is left as it is. Both work from supercells: a 3×3×3 rock-salt supercell gives the 2-atom primitive and the
     8-atom cubic cell, also with positional noise below the tolerance (copies are averaged). The conventional cell
     follows the lattice's own symmetry (cubic, tetragonal, hexagonal, rhombohedral as its triple hexagonal cell,
     orthorhombic with the centred face as C, monoclinic, triclinic).
@@ -46,11 +47,24 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   periodic XSF) shift exactly, by whole grid steps plus a sub-step origin offset. Center on atom puts one selected
   atom in the middle of the cell. The Undo button (or Ctrl/⌘ Z) names what it will undo: deletions, cuts, shifts,
   removed layers, derived cells.
+- **Trajectories**: a player appears under the view: play and pause (`Space`), drag through frames, step with `←` `→`
+  (`Shift` for ten, `Home` / `End` for the ends). The Trajectory panel sets the speed (1-60 frames per second), shows
+  every n-th frame, and loops, bounces or stops at the end; when the file has energies it draws them per frame (click
+  the line to jump to a frame). Edits apply to every frame: a deleted atom is gone from the whole trajectory, and
+  measurements follow the atoms as they move.
+  **Movies**: GIF or video (MP4 or WebM, whichever the browser records) at a chosen speed, frame range and size. GIFs
+  share one palette over the whole movie (no flicker) and store only what changed between frames, so they stay small.
+  Videos are recorded in real time. **All frames as XYZ** saves the trajectory with the shift and deletions applied.
+- **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
+  and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
 - **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
   vector, `L` labels, `S` save a PNG, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
   wordmark returns to the opening page.
+- **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
+  reload brings it back. Scenes up to 512 MB of files are kept whole; larger files come back as atoms only. **New
+  scene** (top left) clears it, and can be undone.
 - **Hide**: each corner (title, panel, axes and cell, view buttons) has a small eye at the very corner that tucks it
   away; `H` hides or shows all four. The panel never scrolls sideways; its rows wrap to fit.
 
@@ -73,7 +87,8 @@ blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
 ## Develop
 
 A static site with no build step. Serve the folder with any static server (`python3 -m http.server`) and open it.
-Tests of the readers, meshing, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
+Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
+symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).
 
 MIT licence.

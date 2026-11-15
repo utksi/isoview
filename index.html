@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -19,6 +19,7 @@
     <span>isoview</span>
   </button>
   <div class="doc" id="doc" hidden><span id="doc-name"></span><span id="doc-sub"></span></div>
+  <button type="button" class="newscene" id="btn-new" hidden title="Clear the scene and start again (it can be undone)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>New scene</button>
 </header>
 
 <aside class="dock glass corner" id="dock" hidden>
@@ -56,6 +57,7 @@
     <summary><span>Structure</span><em id="sum-structure"></em></summary>
     <div class="body">
       <div class="row"><span class="lab">Style</span><div class="seg" data-key="style"><button type="button" value="ball">Ball</button><button type="button" value="space">Space</button><button type="button" value="stick">Stick</button><button type="button" value="off">Off</button></div></div>
+      <div class="row col"><span class="lab">Look</span><div class="seg wide" data-key="look"><button type="button" value="classic" title="Lit spheres with a highlight">Classic</button><button type="button" value="soft" title="Soft light from above and depth fog, as in many papers">Soft</button><button type="button" value="glossy" title="Strong highlights and a bright rim">Glossy</button><button type="button" value="toon" title="Cartoon: three tones, a highlight dot and outlines">Toon</button><button type="button" value="outline" title="Flat colours with ink outlines, like a drawing">Outline</button></div></div>
       <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
       <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output></div></div>
@@ -90,6 +92,24 @@
     </div>
   </details>
 
+  <details class="sec" name="dock" id="sec-traj" hidden>
+    <summary><span>Trajectory</span><em id="sum-traj"></em></summary>
+    <div class="body">
+      <div class="row"><span class="lab">Frames</span><span class="num-plain ell" id="tr-info"></span></div>
+      <div class="row"><label class="lab" for="tr-fps">Speed</label><div class="pair"><input type="range" id="tr-fps" min="1" max="60" step="1" value="12"><output id="tr-fps-out" class="num">12 fps</output></div></div>
+      <div class="row"><label class="lab" for="tr-step">Step</label><div class="reps"><span>every</span><input type="number" id="tr-step" min="1" value="1" aria-label="show every n-th frame"><span id="tr-step-u">frame</span></div></div>
+      <div class="row"><span class="lab">At the end</span><div class="seg" data-key="loop"><button type="button" value="loop">Loop</button><button type="button" value="bounce">Bounce</button><button type="button" value="once">Stop</button></div></div>
+      <div class="spark" id="tr-spark" hidden><svg id="tr-svg" aria-label="Energy of each frame; click to go to a frame"></svg><div class="spark-r"><span id="tr-e-range"></span><span id="tr-e-now"></span></div></div>
+      <div class="sub-h">Movie</div>
+      <div class="row"><span class="lab">Format</span><div class="seg" data-key="mfmt"><button type="button" value="gif">GIF</button><button type="button" value="video" id="mfmt-video">Video</button></div></div>
+      <div class="row"><label class="lab" for="mv-fps">Movie speed</label><div class="reps"><input type="number" id="mv-fps" min="1" max="60" value="12" aria-label="movie frames per second"><span>fps</span></div></div>
+      <div class="row"><span class="lab">Frames</span><div class="reps"><input type="number" id="mv-from" min="1" value="1" aria-label="first frame"><span>to</span><input type="number" id="mv-to" min="1" value="1" aria-label="last frame"></div></div>
+      <div class="row"><span class="lab">Size</span><div class="seg" data-key="msize"><button type="button" value="1">Full</button><button type="button" value="0.5">½</button><button type="button" value="0.25">¼</button></div></div>
+      <p class="note" id="mv-note"></p>
+      <div class="tool-row pad"><button type="button" id="mv-go">Export GIF</button><button type="button" id="tr-xyz" title="Every frame (at the chosen step) with the shift and deletions applied, as extended XYZ">All frames as XYZ</button></div>
+    </div>
+  </details>
+
   <details class="sec" name="dock" id="sec-view">
     <summary><span>View</span><em id="sum-view"></em></summary>
     <div class="body">
@@ -99,6 +119,7 @@
       <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>L</kbd> labels <kbd>S</kbd> save image <kbd>H</kbd> hide panels</p>
       <p class="keys">Click atoms to measure: two give a distance, three an angle, four a dihedral. Click empty space to clear.</p>
       <p class="keys"><kbd>Shift</kbd> + drag: draw a region to select atoms (and to cut the surface).</p>
+      <p class="keys"><kbd>Space</kbd> plays a trajectory · <kbd>←</kbd><kbd>→</kbd> step through frames (<kbd>Shift</kbd>: ×10).</p>
       <p class="keys"><kbd>Del</kbd> deletes the selected atoms · <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>Z</kbd> undoes · right-drag pans.</p>
     </div>
   </details>
@@ -120,6 +141,11 @@
   <button type="button" id="btn-snap" title="Save image (S)" aria-label="Save image"><svg viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
 </div>
 
+<div class="player glass" id="player" hidden>
+  <button type="button" id="pl-play" class="pl-play" aria-label="Play (Space)" title="Play (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5.5v13l10.5-6.5z" fill="currentColor"/><path class="i-pause" d="M7.5 5.5h3v13h-3zM13.5 5.5h3v13h-3z" fill="currentColor"/></svg></button>
+  <input type="range" id="pl-frame" min="0" max="0" step="1" value="0" aria-label="Frame">
+  <span class="pl-n" id="pl-count">1 / 1</span>
+</div>
 <div class="pill glass" id="measure" hidden></div>
 <div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong">Done</button></div>
 
@@ -130,9 +156,9 @@
     <p class="lede">Visualize, edit and create crystal structures and volumetric data, in the browser.</p>
     <div class="actions"><button type="button" class="primary" id="btn-open2">Open files</button><span>or drop them anywhere</span></div>
     <button type="button" class="back" id="btn-back" hidden></button>
-    <p class="formats">POSCAR · CONTCAR · CIF · XSF · pw.in · cube · xyz · geometry.in<br>CHGCAR · PARCHG · LOCPOT · ELFCAR · WAVECAR</p>
+    <p class="formats">POSCAR · CONTCAR · CIF · XSF · pw.in · cube · xyz · geometry.in · PDB<br>CHGCAR · PARCHG · LOCPOT · ELFCAR · WAVECAR<br>XDATCAR · OUTCAR · vasprun.xml · ASE .traj · extxyz · AXSF · LAMMPS dump · pw.x output · .gro · CASTEP .md</p>
     <p class="examples">Try <button type="button" data-example="rutile">rutile TiO₂</button> · <button type="button" data-example="graphene">graphene</button> · <button type="button" data-example="h3d">a hydrogen 3d orbital</button></p>
-    <p class="fine">Files are read on your device and never uploaded. A WAVECAR is read band by band, so large ones open quickly. Drawn with WebGPU where available, WebGL2 elsewhere. <a href="https://github.com/utksi/isoview" target="_blank" rel="noopener">Source</a></p>
+    <p class="fine">Files are read on your device and never uploaded; the last scene is kept in this browser, so a reload brings it back (New scene clears it). A WAVECAR is read band by band, so large ones open quickly. Drawn with WebGPU where available, WebGL2 elsewhere. <a href="https://github.com/utksi/isoview" target="_blank" rel="noopener">Source</a></p>
   </div>
 </section>
 
@@ -141,6 +167,6 @@
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=6"></script>
+<script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>
