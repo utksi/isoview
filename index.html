@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=14">
+<link rel="stylesheet" href="css/style.css?v=15">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -24,6 +24,7 @@
 </header>
 
 <aside class="dock glass corner" id="dock" hidden>
+  <button type="button" class="search-open" id="btn-search" aria-label="Search options"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Search options</span><kbd class="search-kbd">Ctrl F</kbd></button>
   <details class="sec" id="sec-layers" open>
     <summary><span>Layers</span><em id="sum-layers"></em></summary>
     <div class="body">
@@ -32,7 +33,10 @@
       <div class="tools" id="tools" hidden>
         <div class="tools-for"><span class="lab">Structure</span><span id="tools-for" class="ell"></span></div>
         <div class="tool-row" id="row-cells"><button type="button" id="t-prim" title="Find the primitive cell, also from a supercell (added as a new layer)">Primitive cell</button><button type="button" id="t-conv" title="Build the conventional cell, also from a supercell (added as a new layer)">Conventional cell</button><label class="tol" for="t-tol" title="Symmetry tolerance: positions that agree within this distance count as the same site">± <input type="number" id="t-tol" value="0.01" step="0.005" min="0.0001"> Å</label></div>
-        <div class="tool-row"><span class="lab">Export as shown</span><button type="button" data-fmt="poscar">POSCAR</button><button type="button" data-fmt="cif">CIF</button><button type="button" data-fmt="xyz">XYZ</button></div>
+        <div class="export">
+          <div class="exp-h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Export as shown</span><em>shift, deletions and repeat applied</em></div>
+          <div class="tool-row"><button type="button" data-fmt="poscar">POSCAR</button><button type="button" data-fmt="cif">CIF</button><button type="button" data-fmt="xyz">XYZ</button></div>
+        </div>
       </div>
     </div>
   </details>
@@ -117,6 +121,7 @@
       <div class="row"><span class="lab">Projection</span><div class="seg" data-key="proj"><button type="button" value="persp">Perspective</button><button type="button" value="ortho">Ortho</button></div></div>
       <div class="row"><span class="lab">Theme</span><div class="seg" data-key="theme"><button type="button" value="auto">Auto</button><button type="button" value="light">Light</button><button type="button" value="dark">Dark</button></div></div>
       <div class="row"><span class="lab">Renderer</span><span class="num-plain" id="gfx">–</span></div>
+      <p class="keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>F</kbd> search options</p>
       <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>L</kbd> labels <kbd>S</kbd> save image <kbd>H</kbd> hide panels</p>
       <p class="keys">Click atoms to measure: two give a distance, three an angle, four a dihedral. Click empty space to clear.</p>
       <p class="keys"><kbd>Shift</kbd> + drag: draw a region to select atoms (and to cut the surface).</p>
@@ -148,7 +153,7 @@
   <span class="pl-n" id="pl-count">1 / 1</span>
 </div>
 <div class="pill glass" id="measure" hidden></div>
-<div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong">Done</button></div>
+<div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-all" title="Label every atom drawn">Label all</button><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong" title="Leave label mode (L); the labels stay">Done</button></div>
 
 <section id="empty">
   <div class="hero">
@@ -166,8 +171,15 @@
 <div id="drop" hidden><div class="zone" data-mode="replace"><span class="one">Drop to open</span><span class="two">Replace the scene</span></div><div class="zone" data-mode="add">Add to the scene</div></div>
 <div id="busy" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="spot" class="spot" hidden>
+  <div class="spot-box glass" role="dialog" aria-label="Search options">
+    <div class="spot-in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><input id="spot-q" type="search" placeholder="Search options" autocomplete="off" spellcheck="false" aria-label="Search options" aria-controls="spot-list"><kbd>Esc</kbd></div>
+    <ul id="spot-list" role="listbox" aria-label="Options"></ul>
+    <p class="spot-foot"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Enter</kbd> go to the option · <kbd>Esc</kbd> close</p>
+  </div>
+</div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=14"></script>
+<script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

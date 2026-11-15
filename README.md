@@ -70,6 +70,7 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
   and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
+  The bar that appears also has **Label all** (every atom drawn) and Clear.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
 - **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
   vector, `L` labels, `S` save a PNG, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
@@ -77,6 +78,9 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 - **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
   reload brings it back. Scenes up to 512 MB of files are kept whole; larger files come back as atoms only. **New
   scene** (top left) clears it, and can be undone.
+- **Search options**: `Ctrl F` / `⌘ F`, or the field at the top of the panel, searches every option by name and by
+  the words people use for it ("isovalue" finds Level, "supercell" finds Repeat, "toon" finds Look). Choosing one
+  opens its panel, scrolls to it and outlines it; an option that needs another kind of file says which.
 - **Hide**: each corner (title, panel, axes and cell, view buttons) has a small eye at the very corner that tucks it
   away; `H` hides or shows all four. The panel never scrolls sideways; its rows wrap to fit.
 

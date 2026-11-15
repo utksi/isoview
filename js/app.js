@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=14";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=14";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=14";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=14";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=14";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=14";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=14";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=14";
-import { measureAll } from "./measure.js?v=14";
-import { GifWriter, buildPalette } from "./gif.js?v=14";
-import * as store from "./store.js?v=14";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=15";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=15";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=15";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=15";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=15";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=15";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=15";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=15";
+import { measureAll } from "./measure.js?v=15";
+import { GifWriter, buildPalette } from "./gif.js?v=15";
+import * as store from "./store.js?v=15";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -105,7 +105,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=14", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=15", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -796,7 +796,12 @@ function setBoxMode(on) {
 }
 function labelBar() {
   $("labelbar").hidden = !S.labelMode;
-  if (S.labelMode) $("label-count").textContent = S.labels.length ? `${S.labels.length} labelled` : "Click atoms to label them";
+  if (S.labelMode) $("label-count").textContent = S.labels.length ? `${S.labels.length} labelled · click to add or remove` : "Click atoms to label them";
+}
+/** Label every atom drawn (all visible structures, periodic images included). */
+function labelAll() {
+  S.labels = disp.atoms.map((a, i) => ({ i, layer: a.layer, src: a.src, p: [a.x, a.y, a.z] }));
+  uploadLabels(); requestRender();
 }
 
 /* ------------------------------------------------------------------ pointer */
@@ -1324,6 +1329,151 @@ for (const c in CORNERS) {
   tuck(c, false);
 }
 
+/* ------------------------------------------------------------------ search options (Ctrl/Cmd F) */
+// Every option: t = its name, sel = the control, k = other words people use for it, self = highlight the control
+// itself (toolbar buttons) rather than its row, before = make it reachable first (label mode for Label all).
+const OPTIONS = [
+  { t: "Layers", sel: "#layers", k: "layer files show hide remove colour color superimpose" },
+  { t: "Add files to the scene", sel: "#btn-add", k: "add open another superimpose overlay combine" },
+  { t: "Primitive cell", sel: "#t-prim", k: "primitive reduce reduced cell symmetry supercell niggli" },
+  { t: "Conventional cell", sel: "#t-conv", k: "conventional standard cell symmetry bravais" },
+  { t: "Symmetry tolerance", sel: "#t-tol", k: "tolerance symprec space group precision" },
+  { t: "Export as shown (POSCAR, CIF, XYZ)", sel: ".export", k: "export save download write poscar cif xyz file", self: true },
+  { t: "Draw a region", sel: "#e-region", k: "lasso region select selection area freehand" },
+  { t: "Delete atoms", sel: "#e-delete", k: "delete remove atoms vacancy erase" },
+  { t: "Cut surface", sel: "#e-cut", k: "cut slice clip remove surface isosurface" },
+  { t: "Restore the surface", sel: "#cuts-clear", k: "restore uncut surface cuts" },
+  { t: "Center on atom", sel: "#e-center", k: "center centre middle pivot atom" },
+  { t: "Shift origin", sel: "#fx", k: "shift translate move origin fractional offset wrap" },
+  { t: "Undo", sel: "#e-undo", k: "undo revert back ctrl z" },
+  { t: "Style", sel: '.seg[data-key="style"]', k: "ball stick space filling spacefill hide atoms representation" },
+  { t: "Look", sel: '.seg[data-key="look"]', k: "look toon cartoon glossy soft outline fog shading render style paper" },
+  { t: "Atom size", sel: "#scale", k: "size radius scale atoms" },
+  { t: "Bonds", sel: "#bonds", k: "bonds on off" },
+  { t: "Bond reach", sel: "#tol", k: "bond length cutoff distance bonding reach keep" },
+  { t: "Cell outline", sel: "#cell", k: "cell box unit cell lattice outline frame" },
+  { t: "Repeat (supercell)", sel: "#ra", k: "repeat supercell tile replicate periodic images" },
+  { t: "Boundary atoms", sel: "#boundary", k: "boundary faces edge corner atoms wrap images" },
+  { t: "Field", sel: "#field", k: "field dataset magnetization spin density channel" },
+  { t: "Show surface", sel: "#surf", k: "surface isosurface show hide on off" },
+  { t: "Level (isovalue)", sel: "#iso", k: "level isovalue iso threshold contour value density" },
+  { t: "Negative lobe", sel: "#pm", k: "negative lobe sign phase minus" },
+  { t: "Opacity", sel: "#opacity", k: "opacity transparency alpha translucent" },
+  { t: "Resolution", sel: '.seg[data-key="res"]', k: "resolution quality grid stride smooth coarse" },
+  { t: "Band", sel: "#bands", k: "band orbital wavefunction homo lumo state eigenvalue" },
+  { t: "Spin", sel: '.seg[data-key="wspin"]', k: "spin up down channel" },
+  { t: "k-point", sel: "#kpt", k: "k-point kpoint kpt" },
+  { t: "|ψ|² or ψ", sel: '.seg[data-key="wmode"]', k: "psi wavefunction phase sign density" },
+  { t: "Play / pause", sel: "#pl-play", k: "play pause animate animation trajectory movie", self: true },
+  { t: "Frame", sel: "#pl-frame", k: "frame step time slider trajectory", self: true },
+  { t: "Speed", sel: "#tr-fps", k: "speed fps frames per second playback" },
+  { t: "Step (every n-th frame)", sel: "#tr-step", k: "step stride skip every frame" },
+  { t: "At the end (loop, bounce, stop)", sel: '.seg[data-key="loop"]', k: "loop bounce stop repeat end" },
+  { t: "Energy per frame", sel: "#tr-spark", k: "energy plot graph trajectory" },
+  { t: "Movie format", sel: '.seg[data-key="mfmt"]', k: "movie gif video mp4 webm format" },
+  { t: "Movie speed", sel: "#mv-fps", k: "movie fps speed frames per second" },
+  { t: "Movie frames", sel: "#mv-from", k: "movie frames range from to" },
+  { t: "Movie size", sel: '.seg[data-key="msize"]', k: "movie size resolution width pixels" },
+  { t: "Export movie", sel: "#mv-go", k: "export movie gif video mp4 webm record save animation" },
+  { t: "All frames as XYZ", sel: "#tr-xyz", k: "export trajectory frames xyz save" },
+  { t: "Projection", sel: '.seg[data-key="proj"]', k: "projection perspective orthographic ortho" },
+  { t: "Theme", sel: '.seg[data-key="theme"]', k: "theme dark light mode colours colors" },
+  { t: "Renderer", sel: "#gfx", k: "renderer webgpu webgl gpu" },
+  { t: "Keyboard shortcuts", sel: "#sec-view .keys", k: "keyboard shortcuts keys help" },
+  { t: "View along a, b, c", sel: '[data-along="0"]', k: "view along axis orient direction a b c", self: true },
+  { t: "Label atoms", sel: "#btn-label", k: "label labels names symbols annotate tag element", self: true },
+  { t: "Label all atoms", sel: "#label-all", k: "label all labels every atom names symbols", self: true, before: () => setLabelMode(true) },
+  { t: "Reset view", sel: "#btn-reset", k: "reset view fit home recenter camera", self: true },
+  { t: "Open files", sel: "#btn-open", k: "open load import file replace", self: true },
+  { t: "Save image", sel: "#btn-snap", k: "save image screenshot png picture snapshot export", self: true },
+  { t: "New scene", sel: "#btn-new", k: "new scene clear start over reset", self: true },
+  { t: "Opening page and samples", sel: "#btn-home", k: "home opening page samples examples start", self: true },
+  { t: "Space group", sel: "#doc-sg", k: "space group symmetry spacegroup hermann mauguin", self: true },
+  { t: "Hide the panels", sel: '.corner-eye[data-corner="tr"]', k: "hide panels eye tuck corner H", self: true },
+];
+const WHY = { "sec-surface": "needs a volumetric file", "sec-orbital": "needs a WAVECAR", "sec-traj": "needs a trajectory", player: "needs a trajectory",
+  dock: "open a file first", br: "open a file first", bl: "open a file first", "doc-sg": "needs a periodic structure", "btn-new": "open a file first", "e-cut": "needs a surface",
+  "row-cuts": "after a cut", "row-tol": "with bonds on", "row-field": "with several fields", "row-pm": "for signed fields", "mfmt-video": "this browser cannot record video",
+  "row-spin": "for spin-polarised WAVECARs", "row-k": "with several k-points", "row-wmode": "for Γ-only WAVECARs", "row-half": "for Γ-only WAVECARs", "tr-spark": "when the file has energies" };
+/** Why a control is not available now ("" when it is). */
+function whyNot(el) {
+  if (el.id === "label-all") return S.layers.length ? "" : "open a file first";
+  const h = el.closest("[hidden]");
+  if (!h) return "";
+  if (h.classList.contains("pbc")) return "for periodic structures";
+  if (h.classList.contains("has-cell")) return "needs a cell or box";
+  return WHY[h.id] || "not available for this file";
+}
+const whereOf = el => {
+  const sec = el.closest("details.sec");
+  if (sec) return sec.querySelector("summary span").textContent;
+  if (el.closest("#br")) return "View buttons"; if (el.closest("#player")) return "Player"; if (el.closest(".tl")) return "Title bar";
+  if (el.closest("#labelbar")) return "Label bar"; if (el.closest(".corner-eye")) return "Corners"; return "";
+};
+let spotHits = [], spotAt = 0;
+const reEsc = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Score of an option for the query: every word must hit the name (best), its other words or its panel. */
+function spotScore(o, q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean), t = o.t.toLowerCase(), k = o.k.toLowerCase(), w = (o.where || "").toLowerCase();
+  let sc = 0;
+  for (const x of words) {
+    const b = new RegExp("(^|[^a-z0-9])" + reEsc(x));
+    if (t.startsWith(x)) sc += 6; else if (b.test(t)) sc += 4; else if (t.includes(x)) sc += 3;
+    else if (b.test(k)) sc += 2; else if (k.includes(x) || w.includes(x)) sc += 1; else return 0;
+  }
+  return sc || 1;
+}
+function spotRender() {
+  const q = $("spot-q").value.trim();
+  spotHits = OPTIONS.map(o => { const el = document.querySelector(o.sel); return el ? { ...o, el, where: whereOf(el), why: whyNot(el) } : null; })
+    .filter(Boolean).map(o => ({ ...o, sc: spotScore(o, q) })).filter(o => o.sc > 0)
+    .sort((a, b) => (!!a.why - !!b.why) || (b.sc - a.sc));
+  spotAt = Math.min(spotAt, Math.max(0, spotHits.length - 1));
+  const mark = t => { if (!q) return esc(t); const i = t.toLowerCase().indexOf(q.toLowerCase()); return i < 0 ? esc(t) : esc(t.slice(0, i)) + "<b>" + esc(t.slice(i, i + q.length)) + "</b>" + esc(t.slice(i + q.length)); };
+  $("spot-list").innerHTML = spotHits.length ? spotHits.map((o, i) => `<li role="option" class="sr${o.why ? " off" : ""}" data-i="${i}" aria-selected="${i === spotAt}"><span class="st">${mark(o.t)}</span><span class="sw">${esc(o.where)}</span>${o.why ? `<span class="sy">${esc(o.why)}</span>` : ""}</li>`).join("")
+    : `<li class="none">No option matches “${esc(q)}”.</li>`;
+  const cur = $("spot-list").querySelector('[aria-selected="true"]');
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+}
+function openSearch() {
+  $("spot").hidden = false; $("spot-q").value = ""; spotAt = 0; spotRender(); $("spot-q").focus();
+}
+function closeSearch() { $("spot").hidden = true; }
+/** Go to an option: show its corner and panel, scroll to it, outline it for a moment and focus it. */
+function goToOption(o) {
+  closeSearch();
+  if (o.before && S.layers.length) o.before();
+  const el = document.querySelector(o.sel);
+  if (!el) return;
+  const why = whyNot(el);
+  if (why) { toast(`${o.t}: ${why}.`, false, 3500); return; }
+  for (const c in CORNERS) if ($(CORNERS[c]).contains(el)) tuck(c, false);
+  const sec = el.closest("details.sec");
+  if (sec) sec.open = true;
+  const box = o.self ? el : el.closest(".row, .tool-row, .sel-line, .spark, .keys, .row-btns, .layers") || el;
+  box.classList.remove("found");
+  void box.offsetWidth;
+  box.classList.add("found");
+  setTimeout(() => box.classList.remove("found"), 2400);
+  if (box.scrollIntoView) box.scrollIntoView({ block: "center", behavior: "smooth" });
+  const f = el.matches("input, select, button, [tabindex]") ? el : box.querySelector("input, select, button, [tabindex]");
+  if (f && f.focus) f.focus({ preventScroll: true });
+}
+$("btn-search").addEventListener("click", openSearch);
+$("spot-q").addEventListener("input", () => { spotAt = 0; spotRender(); });
+$("spot-q").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); spotAt = Math.max(0, Math.min(spotHits.length - 1, spotAt + (e.key === "ArrowDown" ? 1 : -1))); spotRender(); }
+  else if (e.key === "Enter") { e.preventDefault(); if (spotHits[spotAt]) goToOption(spotHits[spotAt]); }
+  else if (e.key === "Escape") { e.preventDefault(); closeSearch(); }
+});
+$("spot-list").addEventListener("click", e => { const li = e.target.closest("[data-i]"); if (li) goToOption(spotHits[+li.dataset.i]); });
+$("spot").addEventListener("pointerdown", e => { if (e.target === $("spot")) closeSearch(); });
+{
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  for (const k of document.querySelectorAll(".search-kbd")) k.textContent = mac ? "⌘F" : "Ctrl F";
+  $("btn-search").title = `Search options (${mac ? "⌘F" : "Ctrl+F"})`;
+}
+
 /* ------------------------------------------------------------------ wiring */
 function bindSeg(key, fn) {
   document.querySelector(`.seg[data-key="${key}"]`).addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
@@ -1428,6 +1578,7 @@ $("e-center").addEventListener("click", centerOnSelected);
 $("e-undo").addEventListener("click", undo);
 $("sel-clear2").addEventListener("click", clearSelection);
 $("label-done").addEventListener("click", () => setLabelMode(false));
+$("label-all").addEventListener("click", labelAll);
 $("label-clear").addEventListener("click", () => { S.labels = []; uploadLabels(); requestRender(); });
 $("btn-back").addEventListener("click", () => { $("empty").hidden = true; });
 $("btn-new").addEventListener("click", newScene);
@@ -1459,13 +1610,16 @@ window.addEventListener("paste", e => {
   if (t && t.trim()) openFiles([new File([t], "pasted")], S.layers.length ? "add" : "replace");
 });
 window.addEventListener("keydown", e => {
+  // Ctrl/Cmd F opens the option search from anywhere (also inside inputs), instead of the browser's find
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") { e.preventDefault(); if ($("spot").hidden) openSearch(); else $("spot-q").select(); return; }
   if (e.target && e.target.closest && e.target.closest("input, select, textarea, .bands")) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (k === "o") pick("replace");
   else if (k === "escape") {
-    if (!$("empty").hidden && S.layers.length) $("empty").hidden = true;
+    if (!$("spot").hidden) closeSearch();
+    else if (!$("empty").hidden && S.layers.length) $("empty").hidden = true;
     else if (S.labelMode) setLabelMode(false);
     else if (S.sel.length || S.region) clearSelection();
     else if (S.boxMode) setBoxMode(false);
