@@ -7,6 +7,8 @@
  * linear interpolation; it is created once and shared by the four cells around the edge (edge-id caches over two
  * z planes). Normal n = -grad f / |grad f| (toward lower values), with grad f = J^-T g and g the index-space gradient
  * from central differences (one-sided on the grid faces), interpolated with the same t.
+ * Cells with a NaN corner (cut away, field.js) are skipped, so a cut leaves an open edge; gradients next to NaN points
+ * fall back to one-sided differences.
  * Output { positions: Float32Array(3V), normals: Int16Array(4V) (snorm16 x, y, z, 0), indices: Uint32Array(3T),
  * truncated } with at most maxTris triangles.
  */
@@ -39,12 +41,19 @@ export function marchingCubes(grid, iso, maxTris = 6e6) {
   let Y0 = new Int32Array(sxy).fill(-1), Y1 = new Int32Array(sxy).fill(-1);
   const Z = new Int32Array(sxy);
   const g0 = [0, 0, 0], g1 = [0, 0, 0];
+  // derivative along one axis from the values below (lo), at (c) and above (hi) the point, NaN-safe
+  const der = (lo, c, hi) => {
+    const a = lo === lo ? lo : NaN, b = hi === hi ? hi : NaN;
+    if (a === a && b === b) return (b - a) / 2;
+    if (b === b) return b - c;
+    if (a === a) return c - a;
+    return 0;
+  };
   const grad = (i, j, k, g) => {
-    const i0 = i > 0 ? i - 1 : i, i1 = i < nx - 1 ? i + 1 : i, j0 = j > 0 ? j - 1 : j, j1 = j < ny - 1 ? j + 1 : j;
-    const k0 = k > 0 ? k - 1 : k, k1 = k < nz - 1 ? k + 1 : k;
-    g[0] = i1 > i0 ? (at(i1, j, k) - at(i0, j, k)) / (i1 - i0) : 0;
-    g[1] = j1 > j0 ? (at(i, j1, k) - at(i, j0, k)) / (j1 - j0) : 0;
-    g[2] = k1 > k0 ? (at(i, j, k1) - at(i, j, k0)) / (k1 - k0) : 0;
+    const c = at(i, j, k);
+    g[0] = der(i > 0 ? at(i - 1, j, k) : NaN, c, i < nx - 1 ? at(i + 1, j, k) : NaN);
+    g[1] = der(j > 0 ? at(i, j - 1, k) : NaN, c, j < ny - 1 ? at(i, j + 1, k) : NaN);
+    g[2] = der(k > 0 ? at(i, j, k - 1) : NaN, c, k < nz - 1 ? at(i, j, k + 1) : NaN);
   };
   const vertex = (i, j, k, ax) => {
     const di = ax === 0 ? 1 : 0, dj = ax === 1 ? 1 : 0, dk = ax === 2 ? 1 : 0;
@@ -71,15 +80,19 @@ export function marchingCubes(grid, iso, maxTris = 6e6) {
     for (let j = 0; j < ny - 1; j++) {
       for (let i = 0; i < nx - 1; i++) {
         const b = i + nx * j + sxy * k;
+        const v0 = f[b], v1 = f[b + 1], v2 = f[b + nx], v3 = f[b + nx + 1];
+        const v4 = f[b + sxy], v5 = f[b + sxy + 1], v6 = f[b + sxy + nx], v7 = f[b + sxy + nx + 1];
+        // NaN marks cut-away points: skip the whole cell (x !== x only for NaN)
+        if (v0 !== v0 || v1 !== v1 || v2 !== v2 || v3 !== v3 || v4 !== v4 || v5 !== v5 || v6 !== v6 || v7 !== v7) continue;
         let c = 0;
-        if (f[b] < iso) c |= 1;
-        if (f[b + 1] < iso) c |= 2;
-        if (f[b + nx] < iso) c |= 4;
-        if (f[b + nx + 1] < iso) c |= 8;
-        if (f[b + sxy] < iso) c |= 16;
-        if (f[b + sxy + 1] < iso) c |= 32;
-        if (f[b + sxy + nx] < iso) c |= 64;
-        if (f[b + sxy + nx + 1] < iso) c |= 128;
+        if (v0 < iso) c |= 1;
+        if (v1 < iso) c |= 2;
+        if (v2 < iso) c |= 4;
+        if (v3 < iso) c |= 8;
+        if (v4 < iso) c |= 16;
+        if (v5 < iso) c |= 32;
+        if (v6 < iso) c |= 64;
+        if (v7 < iso) c |= 128;
         const nTri = COUNT[c];
         if (!nTri) continue;
         if (nt + nTri > maxTris) { truncated = true; break; }

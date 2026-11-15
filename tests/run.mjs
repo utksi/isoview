@@ -14,7 +14,7 @@ import { fromParams, params, det3, formula, norm, dot } from "../js/lattice.js";
 import { parseText, detectKind, parseSymop, qeLattice, isWavecarHeader } from "../js/formats.js";
 import { fft1 } from "../js/fft.js";
 import { stats, renderGrid, isoForFraction, fractionAbove } from "../js/field.js";
-import { displayAtoms, bondList } from "../js/structure.js";
+import { displayAtoms, bondList, deleteAtoms, atomId, toPOSCAR } from "../js/structure.js";
 import { Wavecar } from "../js/wavecar.js";
 import { marchingCubes } from "../js/gfx/mc.js";
 import { Camera, qfromRows, qmat, pickSphere } from "../js/gfx/camera.js";
@@ -196,11 +196,49 @@ for (const len of [8, 7, 12]) {
   const r2 = await handle({ op: "open", files: [cube] });
   const f = r2.result.fields[0];
   ok(f && f.kind === "density" && f.stats && f.stats.sorted.length === n * n * n && !("data" in f), "worker open: cube field metadata and stats, no raw data");
-  const r3 = await handle({ op: "mesh", fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.5] });
+  const r3 = await handle({ op: "mesh", ds: r2.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.5] });
   const mm = r3.result.meshes[0];
   ok(mm.triangles > 100 && mm.indices.length === 3 * mm.triangles && r3.transfer.length === 3, `worker mesh: ${mm.triangles} triangles, buffers transferred`);
   const r4 = await handle({ op: "example", name: "h3d" });
   ok(r4.result.fields[0].kind === "signed" && near(r4.result.fields[0].stats.integral, 0, 1e-6), "worker example: hydrogen 3d orbital (signed, integral 0)");
+}
+
+/* origin shift and cuts on fields; shifted atoms; deletion; POSCAR export */
+{
+  const f = { n: [4, 1, 1], data: Float32Array.from([0, 1, 2, 3]), origin: [0, 0, 0], span: [[4, 0, 0], [0, 1, 0], [0, 0, 1]], periodic: true, closed: false };
+  const g = renderGrid(f, [1, 1, 1], 1, [0.5, 0, 0]);
+  ok(Array.from(g.data.slice(0, 5)).join() === "2,3,0,1,2" && g.origin[0] === 0, "field shift 0.5 = roll by 2 grid points");
+  const h = renderGrid(f, [1, 1, 1], 1, [0.3, 0, 0]);
+  ok(Array.from(h.data.slice(0, 5)).join() === "3,0,1,2,3" && near(h.origin[0], 0.2, 1e-12), "field shift 0.3 = roll by 1 point + origin moved 0.2 of a step (exact, no interpolation)");
+  const all = { m: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], r: [-100, -100, 100, 100] };
+  const c = renderGrid(f, [1, 1, 1], 1, [0, 0, 0], [all]);
+  ok(Array.from(c.data).every(Number.isNaN), "a cut covering the view masks every point (NaN)");
+  const n = 31, L = 10, hh = L / (n - 1), d = new Float32Array(n * n * n);
+  for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) d[i + n * (j + n * k)] = 3 - Math.hypot(-5 + i * hh, -5 + j * hh, -5 + k * hh);
+  const sph = { data: d, size: [n, n, n], vox: [[hh, 0, 0], [0, hh, 0], [0, 0, hh]], origin: [-5, -5, -5] };
+  const full = marchingCubes(sph, 0).triangles;
+  const half = { m: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], r: [0, -100, 100, 100] };
+  const g2 = renderGrid({ n: [n, n, n], data: d, origin: [-5, -5, -5], span: [[L, 0, 0], [0, L, 0], [0, 0, L]], periodic: false, closed: false }, [1, 1, 1], 1, [0, 0, 0], [half]);
+  const cut = marchingCubes(g2, 0);
+  ok(cut.triangles > 0.4 * full && cut.triangles < 0.6 * full && Array.from(cut.normals).every(Number.isFinite), `cutting away x > 0 leaves half the sphere (${cut.triangles} of ${full} triangles), finite normals`);
+  const st = { lattice: [[4, 0, 0], [0, 4, 0], [0, 0, 4]], pbc: true, species: ["Na", "Cl", "Na"], pos: Float64Array.from([0.4, 0, 0, 2, 0, 0, 3.6, 2, 0]) };
+  const da = displayAtoms(st, { reps: [1, 1, 1], boundary: false, shift: [0.25, 0, 0] });
+  ok(near(da[0].x, 1.4, 1e-12) && near(da[2].x, 0.6, 1e-9), "atoms shift by 0.25 a and wrap into the cell");
+  const del = deleteAtoms(st, new Set([1]));
+  ok(del.species.join() === "Na,Na" && atomId(del, 1) === 3, "deleting an atom keeps the original numbers of the others");
+  const back = parseText("vasp", toPOSCAR(del, [0.25, 0, 0], "test"));
+  ok(back.structure.species.join() === "Na,Na" && near(back.structure.pos[0], 1.4, 1e-8) && near(back.structure.pos[3], 0.6, 1e-8), "POSCAR export (shifted, edited) reads back");
+}
+/* worker: two datasets at once, mesh with shift and cuts, drop */
+{
+  const a = await handle({ op: "example", name: "h3d" }), b = await handle({ op: "example", name: "h3d" });
+  ok(a.result.ds !== b.result.ds, "worker keeps several datasets (distinct ids)");
+  const m0 = (await handle({ op: "mesh", ds: a.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.01] })).result.meshes[0].triangles;
+  const m1 = (await handle({ op: "mesh", ds: b.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.01], cuts: [{ m: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], r: [0, -100, 100, 100] }] })).result.meshes[0].triangles;
+  ok(m0 > 0 && m1 > 0 && m1 < m0, `worker mesh honours cuts (${m1} < ${m0} triangles)`);
+  await handle({ op: "drop", ds: a.result.ds });
+  let threw = false; try { await handle({ op: "mesh", ds: a.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.01] }); } catch (e) { threw = true; }
+  ok(threw, "a dropped dataset is gone");
 }
 
 /* optional: real files */

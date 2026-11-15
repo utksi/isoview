@@ -7,7 +7,7 @@
 <meta name="description" content="Crystal structures and volumetric data in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=2">
+<link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -22,6 +22,14 @@
 </header>
 
 <aside class="dock glass" id="dock" hidden>
+  <details class="sec" name="dock" id="sec-layers">
+    <summary><span>Layers</span><em id="sum-layers"></em></summary>
+    <div class="body">
+      <div id="layers" class="layers"></div>
+      <div class="row-btns"><button type="button" id="btn-add" class="ghost">Add files to the scene</button></div>
+    </div>
+  </details>
+
   <details class="sec" name="dock" id="sec-structure">
     <summary><span>Structure</span><em id="sum-structure"></em></summary>
     <div class="body">
@@ -33,18 +41,22 @@
       <div class="row pbc"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
       <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
       <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
+      <div class="row pbc"><span class="lab">Shift origin</span><div class="reps"><input type="number" id="fx" step="0.05" value="0" aria-label="shift along a (fraction)"><input type="number" id="fy" step="0.05" value="0" aria-label="shift along b (fraction)"><input type="number" id="fz" step="0.05" value="0" aria-label="shift along c (fraction)"><button type="button" id="shift-reset" class="mini" title="No shift">0</button></div></div>
+      <div class="row" id="row-export"><span class="lab">Edited structure</span><button type="button" id="btn-export" class="ghost">Export POSCAR</button></div>
     </div>
   </details>
 
   <details class="sec" name="dock" id="sec-surface" hidden>
     <summary><span>Surface</span><em id="sum-surface"></em></summary>
     <div class="body">
+      <div class="row"><span class="lab">Layer</span><span class="num-plain ell" id="surf-layer"></span></div>
       <div class="row" id="row-field"><label class="lab" for="field">Field</label><select id="field"></select></div>
       <div class="row"><label class="lab" for="surf">Show</label><input type="checkbox" class="sw" id="surf" checked></div>
       <div class="row col"><div class="lv"><label class="lab" for="iso">Level</label><input id="iso-num" class="num-in" inputmode="decimal" aria-label="isovalue" spellcheck="false"></div><input type="range" id="iso" min="0" max="1000" step="1"><div class="hint" id="iso-hint"></div></div>
       <div class="row" id="row-pm"><label class="lab" for="pm">Negative lobe</label><input type="checkbox" class="sw" id="pm" checked></div>
       <div class="row"><label class="lab" for="opacity">Opacity</label><input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.85"></div>
       <div class="row"><span class="lab">Resolution</span><div class="seg" data-key="res"><button type="button" value="auto">Auto</button><button type="button" value="1">Full</button><button type="button" value="2">½</button><button type="button" value="4">¼</button></div></div>
+      <div class="row" id="row-cuts" hidden><span class="lab" id="cuts-n"></span><button type="button" id="cuts-clear" class="ghost">Restore the cut parts</button></div>
       <div class="stats" id="stats"></div>
     </div>
   </details>
@@ -67,7 +79,7 @@
       <div class="row"><span class="lab">Theme</span><div class="seg" data-key="theme"><button type="button" value="auto">Auto</button><button type="button" value="light">Light</button><button type="button" value="dark">Dark</button></div></div>
       <div class="row"><span class="lab">Renderer</span><span class="num-plain" id="gfx">–</span></div>
       <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>L</kbd> labels <kbd>S</kbd> save image</p>
-      <p class="keys">Click atoms to measure: two give a distance, three an angle, four a dihedral. Click empty space to clear.</p>
+      <p class="keys">Click atoms to measure: two give a distance, three an angle, four a dihedral. Shift + drag selects a box; <kbd>Del</kbd> deletes the selected atoms, <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>Z</kbd> undoes. Right-drag pans.</p>
     </div>
   </details>
 </aside>
@@ -82,6 +94,7 @@
   <button type="button" data-along="1" title="View along b (B)">b</button>
   <button type="button" data-along="2" title="View along c (C)">c</button>
   <span class="sep"></span>
+  <button type="button" id="btn-box" title="Box select (or Shift + drag)" aria-label="Box select" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="4.5" y="5.5" width="15" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.4"/><path d="M14 14l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   <button type="button" id="btn-label" title="Label atoms (L)" aria-label="Label atoms" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4.5 12.2V5.5a1 1 0 0 1 1-1h6.7a1 1 0 0 1 .7.3l6.8 6.8a1 1 0 0 1 0 1.4l-6.7 6.7a1 1 0 0 1-1.4 0l-6.8-6.8a1 1 0 0 1-.3-.7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="8.6" cy="8.6" r="1.4" fill="currentColor"/></svg></button>
   <button type="button" id="btn-reset" title="Reset view (R)" aria-label="Reset view"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button type="button" id="btn-open" title="Open files (O)" aria-label="Open files"><svg viewBox="0 0 24 24"><path d="M3.8 7.2a1.4 1.4 0 0 1 1.4-1.4h4.1l1.8 2h7.7a1.4 1.4 0 0 1 1.4 1.4v8.4a1.4 1.4 0 0 1-1.4 1.4H5.2a1.4 1.4 0 0 1-1.4-1.4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
@@ -104,11 +117,11 @@
   </div>
 </section>
 
-<div id="drop" hidden><div>Drop to open</div></div>
+<div id="drop" hidden><div class="zone" data-mode="replace"><span class="one">Drop to open</span><span class="two">Replace the scene</span></div><div class="zone" data-mode="add">Add to the scene</div></div>
 <div id="busy" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=2"></script>
+<script type="module" src="js/app.js?v=3"></script>
 </body>
 </html>

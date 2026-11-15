@@ -48,7 +48,7 @@ export class WebGL2Renderer {
     this.lines = this.slot(this.lineq, [[0, 2, F, false, 8, 0, 0]], [[1, 3, F, false, 28, 0, 1], [2, 3, F, false, 28, 12, 1], [3, 1, F, false, 28, 24, 1]]);
     this.labels = this.slot(this.quad, [[0, 2, F, false, 8, 0, 0]], [[1, 3, F, false, 44, 0, 1], [2, 1, F, false, 44, 12, 1], [3, 4, F, false, 44, 16, 1],
       [4, 1, F, false, 44, 32, 1], [5, 4, UB, true, 44, 36, 1], [6, 4, UB, true, 44, 40, 1]]);
-    this.meshes = [];
+    this.meshes = []; this.groups = new Map();
     this.bg = [1, 1, 1];
   }
 
@@ -84,10 +84,11 @@ export class WebGL2Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.atlasId = atlas.id;
   }
-  setMeshes(list) {
+  /** Mesh group `key` (one per field layer): list = [{ positions, normals, indices, color: [r, g, b], opacity }]. */
+  setMeshGroup(key, list) {
     const gl = this.gl;
-    for (const m of this.meshes) { gl.deleteVertexArray(m.vao); gl.deleteBuffer(m.pos); gl.deleteBuffer(m.nrm); gl.deleteBuffer(m.idx); }
-    this.meshes = list.filter(m => m.indices.length).map(m => {
+    this.removeMeshGroup(key, true);
+    this.groups.set(key, list.filter(m => m.indices.length).map(m => {
       const vao = gl.createVertexArray();
       gl.bindVertexArray(vao);
       const pos = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pos); gl.bufferData(gl.ARRAY_BUFFER, m.positions, gl.STATIC_DRAW);
@@ -97,9 +98,19 @@ export class WebGL2Renderer {
       const idx = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.indices, gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       return { vao, pos, nrm, idx, n: m.indices.length, color: m.color, opacity: m.opacity };
-    });
+    }));
+    this.meshes = [...this.groups.values()].flat();
   }
-  setMeshColors(list) { this.meshes.forEach((m, i) => { if (list[i]) { m.color = list[i].color; m.opacity = list[i].opacity; } }); }
+  removeMeshGroup(key, keepFlat = false) {
+    const gl = this.gl, g = this.groups.get(key);
+    if (g) { for (const m of g) { gl.deleteVertexArray(m.vao); gl.deleteBuffer(m.pos); gl.deleteBuffer(m.nrm); gl.deleteBuffer(m.idx); } this.groups.delete(key); }
+    if (!keepFlat) this.meshes = [...this.groups.values()].flat();
+  }
+  setMeshGroupStyle(key, list) {
+    const g = this.groups.get(key);
+    if (g) g.forEach((m, i) => { if (list[i]) { m.color = list[i].color; m.opacity = list[i].opacity; } });
+  }
+  clearMeshes() { for (const k of [...this.groups.keys()]) this.removeMeshGroup(k); }
   setBackground(rgb) { this.bg = rgb; }
 
   draw(uniforms) {

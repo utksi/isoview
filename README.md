@@ -25,12 +25,22 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   Signed fields show a positive and a negative surface.
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
+- **Layers**: every file adds layers (its atoms, its field). Drag files onto the right half of the window, or use
+  "Add files to the scene", to superimpose them: a PARCHG on a CHGCAR, a CONTCAR on a WAVECAR, two orbitals from
+  different runs. Each field layer has its own level, opacity and colours; layers can be hidden or removed.
+- **Shift origin** by fractions (fx, fy, fz) of the cell: atoms and fields move together. Periodic fields (CHGCAR,
+  WAVECAR, periodic XSF) shift exactly, by whole grid steps plus a sub-step origin offset. With one atom selected,
+  Center moves it to the middle of the cell.
 - **Measure**: click two atoms for their distance, three for the angle at the middle one, four for the dihedral.
   Click empty space to clear.
+- **Edit**: Shift + drag (or the box tool) selects the atoms in a box. Delete removes the selected atoms (in every
+  periodic image); Cut surface removes the isosurface inside the box (the region stays fixed as you rotate).
+  Ctrl/⌘ Z undoes deletions, cuts, shifts and removed layers. Export POSCAR saves the edited, shifted structure.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
 - **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
-  vector, `L` labels, `S` save a PNG. The isoview wordmark returns to the opening page.
+  vector, `L` labels, `S` save a PNG, `Del` delete, `Esc` clear. Right-drag pans. The isoview wordmark returns to the
+  opening page.
 
 ## How it draws
 

@@ -76,7 +76,7 @@ export class WebGPURenderer {
     this.labels = { buf: null, n: 0 };
     const stat = a => { const b = device.createBuffer({ size: a.byteLength, usage: U.VERTEX | U.COPY_DST }); device.queue.writeBuffer(b, 0, a); return b; };
     this.quad = stat(QUAD); this.lineq = stat(LINEQ); this.cyl = stat(CYL);
-    this.atoms = { buf: null, n: 0 }; this.bonds = { buf: null, n: 0 }; this.lines = { buf: null, n: 0 }; this.meshes = [];
+    this.atoms = { buf: null, n: 0 }; this.bonds = { buf: null, n: 0 }; this.lines = { buf: null, n: 0 }; this.meshes = []; this.groups = new Map();
     this.bg = { r: 1, g: 1, b: 1, a: 1 };
     this.size = [0, 0];
   }
@@ -108,19 +108,29 @@ export class WebGPURenderer {
     this.bgTex = d.createBindGroup({ layout: this.bglTex, entries: [{ binding: 0, resource: this.atlasTex.createView() }, { binding: 1, resource: this.sampler }] });
     this.atlasId = atlas.id;
   }
-  /** meshes: [{ positions, normals, indices, color: [r, g, b], opacity }] */
-  setMeshes(list) {
-    for (const m of this.meshes) { m.pos.destroy(); m.nrm.destroy(); m.idx.destroy(); m.ub.destroy(); }
+  /** Mesh group `key` (one per field layer): list = [{ positions, normals, indices, color: [r, g, b], opacity }]. */
+  setMeshGroup(key, list) {
+    this.removeMeshGroup(key, true);
     const d = this.device, U = GPUB();
-    this.meshes = list.filter(m => m.indices.length).map(m => {
+    this.groups.set(key, list.filter(m => m.indices.length).map(m => {
       const mk = (a, use) => { const b = d.createBuffer({ size: Math.max(16, Math.ceil(a.byteLength / 4) * 4), usage: use | U.COPY_DST }); d.queue.writeBuffer(b, 0, a); return b; };
       const ub = d.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
       d.queue.writeBuffer(ub, 0, new Float32Array([...m.color, m.opacity]));
       return { pos: mk(m.positions, U.VERTEX), nrm: mk(m.normals, U.VERTEX), idx: mk(m.indices, U.INDEX), n: m.indices.length, ub,
         bg: d.createBindGroup({ layout: this.bgl1, entries: [{ binding: 0, resource: { buffer: ub } }] }), opacity: m.opacity };
-    });
+    }));
+    this.meshes = [...this.groups.values()].flat();
   }
-  setMeshColors(list) { this.meshes.forEach((m, i) => { if (list[i]) { m.opacity = list[i].opacity; this.device.queue.writeBuffer(m.ub, 0, new Float32Array([...list[i].color, list[i].opacity])); } }); }
+  removeMeshGroup(key, keepFlat = false) {
+    const g = this.groups.get(key);
+    if (g) { for (const m of g) { m.pos.destroy(); m.nrm.destroy(); m.idx.destroy(); m.ub.destroy(); } this.groups.delete(key); }
+    if (!keepFlat) this.meshes = [...this.groups.values()].flat();
+  }
+  setMeshGroupStyle(key, list) {
+    const g = this.groups.get(key);
+    if (g) g.forEach((m, i) => { if (list[i]) { m.opacity = list[i].opacity; this.device.queue.writeBuffer(m.ub, 0, new Float32Array([...list[i].color, list[i].opacity])); } });
+  }
+  clearMeshes() { for (const k of [...this.groups.keys()]) this.removeMeshGroup(k); }
   setBackground(rgb) { this.bg = { r: rgb[0], g: rgb[1], b: rgb[2], a: 1 }; }
 
   ensureTargets() {

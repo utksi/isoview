@@ -2,13 +2,14 @@
  * Compute worker: file parsing, WAVECAR orbitals and marching cubes, off the main thread. The large arrays (field
  * values, the WAVECAR reader) stay here; the page gets metadata, statistics (stats() of field.js, for the level
  * slider) and finished meshes (transferred, not copied).
- * Requests { id, op, ... } -> replies { id, ok, result | error }:
- *   open { files, attach }               -> { structure, fields: [meta], wave: header | null, notes, title }; with attach
- *                                           and a structure-only drop while a WAVECAR is loaded: { structure, attach: true }
- *                                           (the WAVECAR and its orbital stay loaded)
- *   example { name: 'h3d' }              -> same shape (hydrogen 3d(x2 - y2) orbital computed here)
- *   orbital { s, k, b, signed, half }    -> { field: meta }  (replaces the current fields)
- *   mesh { fi, reps, stride, isos: [..] } -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
+ * Several datasets (one per loaded file group) are kept at once, keyed by the id that open returns, so layers from
+ * different files can be shown together. Requests { id, op, ... } -> replies { id, ok, result | error }:
+ *   open { files }                        -> { ds, structure, fields: [meta], wave: header | null, notes, title }
+ *   example { name: 'h3d' }               -> same shape (hydrogen 3d(x2 - y2) orbital computed here)
+ *   orbital { ds, s, k, b, signed, half } -> { field: meta }  (becomes field 0 of dataset ds)
+ *   mesh { ds, fi, reps, stride, isos: [..], shift, cuts }
+ *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
+ *   drop { ds }                           -> {}  (frees the dataset)
  * meta = the field without `data`, plus `stats`.
  */
 import { detectKind, parseText, isWavecarHeader } from "./formats.js";
@@ -16,7 +17,8 @@ import { Wavecar } from "./wavecar.js";
 import { stats, renderGrid } from "./field.js";
 import { marchingCubes } from "./gfx/mc.js";
 
-const W = { fields: [], wave: null };
+const DS = new Map();
+let nextDs = 1;
 
 function meta(f) { const { data, ...m } = f; return { ...m, stats: stats(f) }; }
 const transfers = m => [m.stats.sorted.buffer, m.stats.cum.buffer];
@@ -57,13 +59,15 @@ export async function handle(msg) {
   const { op } = msg;
   if (op === "open" || op === "example") {
     const d = op === "open" ? await open(msg.files) : hydrogen3d();
-    // keep the previous WAVECAR when only a structure was added to it
-    if (op === "open" && msg.attach && !d.wave && !d.fields.length && W.wave) return { result: { ...d, fields: [], wave: null, attach: true }, transfer: [] };
-    W.fields = d.fields; W.wave = d.wave || null;
+    const ds = nextDs++;
+    DS.set(ds, { fields: d.fields, wave: d.wave || null });
     const metas = d.fields.map(meta);
-    return { result: { structure: d.structure, fields: metas, wave: d.wave ? waveHeader(d.wave) : null, notes: d.notes, title: d.title },
+    return { result: { ds, structure: d.structure, fields: metas, wave: d.wave ? waveHeader(d.wave) : null, notes: d.notes, title: d.title },
       transfer: metas.flatMap(transfers) };
   }
+  if (op === "drop") { DS.delete(msg.ds); return { result: {}, transfer: [] }; }
+  const W = DS.get(msg.ds);
+  if (!W) throw new Error("dataset " + msg.ds + " is not loaded");
   if (op === "orbital") {
     const w = W.wave, r = await w.orbital(msg.s, msg.k, msg.b, { signed: msg.signed, half: msg.half });
     const f = { name: `band ${msg.b + 1}${w.nspin === 2 ? (msg.s ? " ↓" : " ↑") : ""}${r.signed ? " ψ" : " |ψ|²"}`, unit: r.signed ? "Å⁻³ᐟ²" : "Å⁻³",
@@ -75,7 +79,7 @@ export async function handle(msg) {
   if (op === "mesh") {
     const f = W.fields[msg.fi];
     if (!f) throw new Error("no field " + msg.fi);
-    const g = renderGrid(f, msg.reps, msg.stride);
+    const g = renderGrid(f, msg.reps, msg.stride, msg.shift || [0, 0, 0], msg.cuts || []);
     const meshes = msg.isos.map(iso => marchingCubes(g, iso, msg.maxTris || 6e6));
     return { result: { meshes }, transfer: meshes.flatMap(m => [m.positions.buffer, m.normals.buffer, m.indices.buffer]) };
   }

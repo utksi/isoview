@@ -192,3 +192,39 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .back { border: 0; background: none; color: var(--accent); font-size: 13px; padding: 2px 6px; border-radius: 6px; }
 .back:hover { background: var(--hover); }
 @media (max-width: 720px) { .pill { max-width: calc(100vw - 24px); bottom: calc(60px + env(safe-area-inset-bottom, 0px)); } }
+
+/* layers */
+.layers { display: grid; gap: 2px; padding: 2px 8px 4px; }
+.layer { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto 24px; align-items: center; gap: 6px; padding: 3px 4px 3px 2px; border-radius: 8px; cursor: pointer; }
+.layer:hover { background: var(--hover); }
+.layer.active { background: var(--accent-soft); }
+.layer.off .lname { opacity: 0.45; }
+.layer .eye, .layer .rm { border: 0; background: none; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: var(--ink2); padding: 0; }
+.layer .eye svg { width: 17px; height: 17px; }
+.layer .eye[aria-pressed="false"] { color: var(--ink3); opacity: 0.55; }
+.layer .rm { font-size: 16px; color: var(--ink3); width: 24px; }
+.layer .rm:hover, .layer .eye:hover { background: var(--hover); color: var(--ink); }
+.lname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.lk { display: block; font: 10.5px var(--mono); color: var(--ink3); overflow: hidden; text-overflow: ellipsis; }
+.layer input[type="color"] { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border: 0; padding: 0; background: none; cursor: pointer; margin-left: 2px; }
+.layer input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.layer input[type="color"]::-webkit-color-swatch { border-radius: 50%; border: 1px solid var(--line2); }
+.layer input[type="color"]::-moz-color-swatch { border-radius: 50%; border: 1px solid var(--line2); }
+.row-btns { padding: 4px 14px 2px; }
+.ghost { border: 1px dashed var(--line2); background: none; color: var(--ink2); padding: 5px 10px; border-radius: 8px; font-size: 12.5px; justify-self: start; }
+.ghost:hover { color: var(--ink); border-color: var(--ink3); }
+.row-btns .ghost { width: 100%; }
+.mini { border: 0; background: var(--hover); color: var(--ink2); width: 26px; height: 24px; border-radius: 6px; font: 11px var(--mono); }
+.ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reps input[type="number"] { width: 52px; }
+
+/* selection, box, drop zones, toast action */
+#stage.boxing { cursor: crosshair; }
+#ov rect.box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 3; }
+.pill button.warn { color: var(--err); }
+#drop { display: flex; gap: 12px; padding: 0; background: none; border: 0; }
+#drop .zone { flex: 1; display: grid; place-items: center; border: 1.5px dashed var(--accent); border-radius: 18px; background: var(--accent-soft); }
+#drop:not(.two) .zone[data-mode="add"], #drop:not(.two) .two, #drop.two .one { display: none; }
+#drop.two .zone { opacity: 0.55; }
+#drop.two .zone.on { opacity: 1; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+#toast button { border: 0; background: var(--hover); color: var(--accent); font-weight: 600; padding: 2px 9px; border-radius: 6px; margin-left: 8px; }
