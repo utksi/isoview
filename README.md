@@ -47,7 +47,8 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   - **Export as shown** saves the structure as you see it (shift, deletions and supercell applied) as POSCAR, CIF or
     extended XYZ.
 - **Measure**: click two atoms for their distance, three for the angle at the middle one, four for the dihedral.
-  Click empty space to clear.
+  Click empty space to clear. The bar that shows the selection also offers Center and Delete (Cut surface for a
+  region), so the Edit panel need not be open.
 - **Edit** (its own panel): draw a region around atoms with Shift + drag (or switch on "Draw a region"); the region
   is freehand, not a box. Delete removes the selected atoms in every periodic image; Cut surface removes the
   isosurface inside the region (the region stays fixed as you rotate), and Restore the surface brings it back.

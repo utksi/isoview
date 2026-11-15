@@ -17,11 +17,11 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=10";
-import { isUlm, parseAseTraj } from "./traj.js?v=10";
-import { Wavecar } from "./wavecar.js?v=10";
-import { stats, renderGrid, refine } from "./field.js?v=10";
-import { marchingCubes } from "./gfx/mc.js?v=10";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=11";
+import { isUlm, parseAseTraj } from "./traj.js?v=11";
+import { Wavecar } from "./wavecar.js?v=11";
+import { stats, renderGrid, refine } from "./field.js?v=11";
+import { marchingCubes } from "./gfx/mc.js?v=11";
 
 const DS = new Map();
 let nextDs = 1;

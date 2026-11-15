@@ -337,3 +337,7 @@ body.has-player #toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 @media (max-width: 720px) { .newscene { padding: 3px 7px; } }
 .seg.wide { display: flex; }
 .seg.wide button { flex: 1 1 auto; }
+/* quick actions in the selection pill */
+.pill .acts { display: inline-flex; gap: 4px; align-items: center; padding-left: 8px; border-left: 1px solid var(--line); }
+.pill button.warn { color: var(--err); }
+.pill button.link-btn { background: none; color: var(--accent); padding: 4px 6px; }

@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=10";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=10";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=10";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=10";
-import { colorOf, rcov, SPACERS } from "./elements.js?v=10";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=10";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=10";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=10";
-import { measureAll } from "./measure.js?v=10";
-import { GifWriter, buildPalette } from "./gif.js?v=10";
-import * as store from "./store.js?v=10";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=11";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=11";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=11";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=11";
+import { colorOf, rcov, SPACERS } from "./elements.js?v=11";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=11";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=11";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=11";
+import { measureAll } from "./measure.js?v=11";
+import { GifWriter, buildPalette } from "./gif.js?v=11";
+import * as store from "./store.js?v=11";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -104,7 +104,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=10", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=11", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -376,6 +376,13 @@ function updateSelectionBar() {
     m.angles.forEach((a, i) => parts.push(`<span class="mk">∠${esc(atomLabel(S.sel[i + 1]))}</span><span class="mv">${a.toFixed(2)}°</span>`));
     if (m.dihedral !== null) parts.push(`<span class="mk">dihedral</span><span class="mv">${m.dihedral.toFixed(2)}°</span>`);
   } else parts.push(`<span class="atoms">${S.sel.length ? `${S.sel.length} atoms selected` : "Region selected"}</span>`);
+  // quick actions (the Edit panel holds the rest)
+  const act = [];
+  if (S.sel.length === 1) act.push(`<button type="button" data-act="center" title="${primaryCell() ? "Put this atom at the centre of the cell" : "Turn the view about this atom"}">Center</button>`);
+  if (S.sel.length) act.push(`<button type="button" data-act="delete" class="warn" title="Delete the selected atoms in every periodic image and frame (Del)">Delete</button>`);
+  if (S.region && fieldLayers(true).length) act.push(`<button type="button" data-act="cut" class="warn" title="Remove the surface inside the region">Cut surface</button>`);
+  act.push(`<button type="button" data-act="edit" class="link-btn" title="Open the Edit panel">Edit ›</button>`);
+  parts.push(`<span class="acts">${act.join("")}</span>`);
   parts.push(`<button type="button" class="x" id="sel-clear" aria-label="Clear the selection">×</button>`);
   box.innerHTML = parts.join("");
   box.hidden = false;
@@ -1345,6 +1352,15 @@ $("btn-snap").addEventListener("click", snapshot);
 $("btn-home").addEventListener("click", showHome);
 $("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
 $("e-region").addEventListener("click", () => setBoxMode(!S.boxMode));
+$("measure").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  const a = b.dataset.act;
+  if (a === "center") centerOnSelected();
+  else if (a === "delete") deleteSelected();
+  else if (a === "cut") cutSurface();
+  else if (a === "edit") { tuck("tr", false); $("sec-edit").open = true; $("sec-edit").scrollIntoView({ block: "nearest" }); }
+});
 $("pl-play").addEventListener("click", () => play(!S.playing));
 $("pl-frame").addEventListener("input", e => setFrame(+e.target.value));
 $("tr-fps").addEventListener("input", e => { S.fps = +e.target.value; $("tr-fps-out").textContent = `${S.fps} fps`; $("mv-fps").value = S.fps; movieNote(); });

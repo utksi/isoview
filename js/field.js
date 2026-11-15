@@ -25,8 +25,8 @@
  * between +n/2 and -n/2) and transformed back, which keeps the original points and the mean (so the integral). General
  * grids use cubic Catmull-Rom interpolation along each axis, (n - 1) m + 1 points.
  */
-import { det3 } from "./lattice.js?v=10";
-import { fft1 } from "./fft.js?v=10";
+import { det3 } from "./lattice.js?v=11";
+import { fft1 } from "./fft.js?v=11";
 
 /** Field statistics: min, max, maxAbs, integral, the sorted |f| sample and its suffix sums. */
 export function stats(f) {
