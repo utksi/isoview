@@ -388,20 +388,21 @@ if (env.ISOVIEW_WAVECAR) {
   const bad = [];
   for (const f of walk("../js/")) {
     const s = fs.readFileSync(new URL(f, import.meta.url), "utf8");
-    for (const m of s.matchAll(/(?:from|import\()\s*"(\.{1,2}\/[^"]+)"|new URL\("(\.\/worker[^"]*)"/g)) { const u = m[1] || m[2]; if (!u.endsWith(`?v=${v}`)) bad.push(`${f.slice(6)}: ${u}`); }
+    for (const m of s.matchAll(/(?:from|import\()\s*"(\.{1,2}\/[^"]+)"|new URL\("(\.\/[^"]+\.(?:js|wasm)[^"]*)"/g)) { const u = m[1] || m[2]; if (!u.endsWith(`?v=${v}`)) bad.push(`${f.slice(6)}: ${u}`); }
   }
   ok(!bad.length && html.includes(`css/style.css?v=${v}`), `every module import and the worker URL carry v${v}${bad.length ? "; not: " + bad.slice(0, 6).join(", ") : ""}`);
 }
 /* samples on the opening page: every button has a file, every file opens with what it should show */
 {
   const app = fs.readFileSync(new URL("../js/app.js", import.meta.url), "utf8"), html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const SAMPLES = Object.fromEntries([...app.match(/const SAMPLES = \{([\s\S]*?)\};/)[1].matchAll(/(\w+): "([^"]+)"/g)].map(m => [m[1], m[2]]));
+  const SAMPLES = Object.fromEntries([...app.match(/const SAMPLES = \{([\s\S]*?)\};/)[1].matchAll(/(\w+): (?:\{ file: )?"([^"]+)"/g)].map(m => [m[1], m[2]]));
   const ids = [...html.matchAll(/data-example="(\w+)"/g)].map(m => m[1]);
   ok(ids.length >= 20 && ids.every(i => i === "h3d" || SAMPLES[i]) && Object.keys(SAMPLES).every(k => ids.includes(k)), `${ids.length} sample buttons, each with a file in SAMPLES (and no file without a button)`);
-  const want = { cu55: d => d.traj.n === 101 && d.traj.energy, vasprun: d => d.traj.n === 10 && d.structure.species.length === 64, outcar: d => d.traj.n === 3, fe2o3: d => d.traj.n === 5,
-    castep: d => d.traj.n === 3, pt13: d => d.traj.n === 34, al: d => d.traj.n === 61, ag: d => d.traj.n === 51, ni: d => d.traj.n === 51,
-    si: d => near(d.fields[0].stats.integral, 32, 1e-3), elf: d => d.fields.length === 2, locpot: d => d.fields[0].kind === "linear", benzene: d => d.fields[0].kind === "signed",
-    n2: d => d.wave && d.wave.nb === 9, pwo: d => d.structure.species.length === 2 };
+  const want = { cu55: d => d.traj.n === 101 && d.traj.energy, vasprun: d => d.traj.n === 264 && d.structure.species.length === 50 && d.traj.energy, outcar: d => d.traj.n === 79 && d.traj.energy,
+    lisi: d => d.traj.n === 100, pwmd: d => d.traj.n === 101 && d.traj.energy, castep: d => d.traj.n === 31 && d.traj.cells, pt38: d => d.traj.n === 104, al: d => d.traj.n === 121,
+    ag: d => d.traj.n === 121, ni: d => d.traj.n === 121, si: d => near(d.fields[0].stats.integral, 32, 1e-3), elf: d => d.fields.length === 2, locpot: d => d.fields[0].kind === "linear",
+    benzene: d => d.fields[0].kind === "signed", n2: d => d.wave && d.wave.nb === 9, graphene: d => Math.abs(d.structure.pos[2] - 0.5 * d.structure.lattice[2][2]) < 1e-6 };
+  const trajIds = ["vasprun", "outcar", "lisi", "pwmd", "castep", "cu55", "pt38", "al", "ag", "ni"];
   const bad = [];
   for (const [id, f] of Object.entries(SAMPLES)) {
     const b = fs.readFileSync(new URL("../examples/" + f, import.meta.url));
@@ -409,6 +410,8 @@ if (env.ISOVIEW_WAVECAR) {
     catch (e) { bad.push(`${id} (${e.message})`); }
   }
   ok(!bad.length, `all ${Object.keys(SAMPLES).length} sample files open (gzip ones included) with the expected frames, fields or bands${bad.length ? "; wrong: " + bad.join(", ") : ""}`);
+  const html2 = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8"), trajGroup = html2.match(/Trajectories<\/span><span class="sl">(.*?)<\/span><\/div>/)[1];
+  ok(trajIds.every(i => trajGroup.includes(`data-example="${i}"`)) && [...trajGroup.matchAll(/data-example="(\w+)"/g)].every(m => trajIds.includes(m[1])), `every trajectory sample (${trajIds.length}) has at least 30 frames (checked above: 31 to 264)`);
 }
 /* refined grids: Fourier interpolation is exact for band-limited periodic data and keeps the points and the integral;
    Catmull-Rom is exact for quadratics inside a general grid; the point budget holds */

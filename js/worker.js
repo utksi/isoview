@@ -11,17 +11,19 @@
  *   mesh { ds, fi, reps, stride, isos: [..], shift, cuts }
  *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
  *   drop { ds }                           -> {}  (frees the dataset)
+ *   symmetry { lattice, frac, numbers, symprec }
+ *                                         -> { number, hm, hall } (space group by moyo, vendor/moyo; symprec in A)
  * meta = the field without `data`, plus `stats`.
  * Fields are refined on opening (field.js refine: grid step <= 0.1 A, at most 4 M points) and WAVECAR orbitals are
  * built on an FFT box of the same size limits (wavecar.js), so isosurfaces of coarse data are smooth.
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=11";
-import { isUlm, parseAseTraj } from "./traj.js?v=11";
-import { Wavecar } from "./wavecar.js?v=11";
-import { stats, renderGrid, refine } from "./field.js?v=11";
-import { marchingCubes } from "./gfx/mc.js?v=11";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=13";
+import { isUlm, parseAseTraj } from "./traj.js?v=13";
+import { Wavecar } from "./wavecar.js?v=13";
+import { stats, renderGrid, refine } from "./field.js?v=13";
+import { marchingCubes } from "./gfx/mc.js?v=13";
 
 const DS = new Map();
 let nextDs = 1;
@@ -86,6 +88,11 @@ export async function handle(msg) {
       transfer: [...metas.flatMap(transfers), ...(tr ? [tr.pos.buffer, tr.cells && tr.cells.buffer, tr.energy && tr.energy.buffer].filter(Boolean) : [])] };
   }
   if (op === "drop") { DS.delete(msg.ds); return { result: {}, transfer: [] }; }
+  if (op === "symmetry") {
+    const m = await moyoReady();
+    const d = m.analyze_cell(JSON.stringify({ lattice: { basis: msg.lattice.flat() }, positions: msg.frac, numbers: msg.numbers }), msg.symprec, "Standard");
+    return { result: { number: d.number, hm: d.hm_symbol, hall: d.hall_number }, transfer: [] };
+  }
   const W = DS.get(msg.ds);
   if (!W) throw new Error("dataset " + msg.ds + " is not loaded");
   if (op === "orbital") {
@@ -104,6 +111,18 @@ export async function handle(msg) {
     return { result: { meshes }, transfer: meshes.flatMap(m => [m.positions.buffer, m.normals.buffer, m.indices.buffer]) };
   }
   throw new Error("unknown op " + op);
+}
+
+/** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
+let moyo = null;
+function moyoReady() {
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=13").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=13", import.meta.url);
+    const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
+    await m.default({ module_or_path: src });
+    return m;
+  });
+  return moyo;
 }
 
 if (typeof self !== "undefined" && typeof window === "undefined" && typeof self.postMessage === "function") {

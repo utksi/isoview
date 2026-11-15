@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=11";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=11";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=11";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=11";
-import { colorOf, rcov, SPACERS } from "./elements.js?v=11";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=11";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=11";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=11";
-import { measureAll } from "./measure.js?v=11";
-import { GifWriter, buildPalette } from "./gif.js?v=11";
-import * as store from "./store.js?v=11";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=13";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=13";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=13";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=13";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=13";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=13";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=13";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=13";
+import { measureAll } from "./measure.js?v=13";
+import { GifWriter, buildPalette } from "./gif.js?v=13";
+import * as store from "./store.js?v=13";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -104,7 +104,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=11", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=13", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -216,7 +216,7 @@ function buildStructure() {
   uploadAtoms(); uploadLabels();
   R.setBonds(packBonds(bonds), bonds.length);
   R.setLines(packLines(segs), segs.length);
-  updateSelectionBar(); updateInfo();
+  updateSelectionBar(); updateInfo(); updateSymmetry();
   requestRender();
 }
 function uploadAtoms() {
@@ -752,6 +752,33 @@ function exportFrames() {
   toast(`Exported ${parts.length} frames as extended XYZ.`, false, 4000);
 }
 
+/* ------------------------------------------------------------------ space group (moyo, in the worker) */
+let symTimer = 0, symKey = "";
+/** Hermann-Mauguin symbol for display: "F m -3 m" -> "Fm3̄m", "P 4_2/m n m" -> "P4₂/mnm". */
+const hmText = h => h.replace(/\s+/g, "").replace(/-(\d)/g, "$1\u0304").replace(/_(\d)/g, (m, d) => "₀₁₂₃₄₅₆₇₈₉"[d]);
+/** Name the space group of the chosen periodic structure (its current frame) next to the file name, at the symmetry
+ *  tolerance of the cell tools; debounced, and skipped when nothing relevant changed. */
+function updateSymmetry() {
+  clearTimeout(symTimer);
+  symTimer = setTimeout(async () => {
+    const chip = $("doc-sg"), L = activeAtomsLayer(), it = L && itemOf(L), st = it && it.structure;
+    if (!st || !st.pbc || !st.lattice || !st.species.length || !S.layers.length) { chip.hidden = true; symKey = ""; return; }
+    const tol = Math.max(1e-5, parseFloat($("t-tol").value) || 0.01);
+    const key = [it.id, st.species.length, it.traj ? frameOf(it) : -1, tol, st.pos[0], st.pos[st.pos.length - 1]].join("|");
+    if (key === symKey) return;
+    symKey = key;
+    const Li = inv3(st.lattice), frac = [];
+    for (let i = 0; i < st.species.length; i++) frac.push(cartToFrac(Li, [st.pos[3 * i], st.pos[3 * i + 1], st.pos[3 * i + 2]]));
+    try {
+      const r = await call("symmetry", { lattice: st.lattice, frac, numbers: st.species.map(x => Math.max(0, SYMBOLS.indexOf(x))), symprec: tol });
+      if (symKey !== key) return;
+      chip.textContent = `${hmText(r.hm)} (${r.number})`;
+      chip.title = `Space group of ${it.name}${it.traj ? `, frame ${frameOf(it) + 1}` : ""}: ${r.hm.replace(/\s+/g, "")}, No. ${r.number} (moyo, tolerance ${tol} Å; change it next to Primitive cell)`;
+      chip.hidden = false;
+    } catch (e) { chip.hidden = true; console.warn("symmetry:", e); }
+  }, 150);
+}
+
 /* ------------------------------------------------------------------ label mode */
 function setLabelMode(on) {
   S.labelMode = on;
@@ -854,12 +881,25 @@ function syncFieldUI() {
   if (it.wave) syncWaveUI(it);
   levelHint(); summaries();
 }
+/** One sentence on how to read the level, by the kind of field. */
+function levelNote(f) {
+  if (/ELF/i.test(f.name)) return "ELF runs from 0 to 1: near 1 the electrons form localised pairs (cores, bonds, lone pairs), near ½ they behave like a uniform electron gas.";
+  if (f.kind === "signed") return "The two surfaces sit at plus and minus this value; inside them the field is larger in size, and those parts hold the share given of the integral of its absolute value.";
+  if (f.kind === "density") return "Inside the surface the density is higher than this value, and those regions hold the share given: a high value keeps only the densest parts (cores, bonds), a low one reaches into the voids.";
+  return f.unit === "eV" ? "The surface joins the points where the potential has this value." : "The surface joins the points where the field has this value.";
+}
 function levelHint() {
   const L = activeField(), f = activeStats();
   if (!L || !f) return;
   const st = f.stats, u = f.unit ? " " + f.unit : "", signed = f.kind === "signed";
-  if (L.mode === "log") $("iso-hint").textContent = `${signed ? "±" : ""}${sup(fmt(L.iso))}${u} · encloses ${Math.round(100 * fractionAbove(st, L.iso))}% of ${signed ? "∫|f|" : "the total"}`;
-  else $("iso-hint").textContent = `${sup(fmt(L.iso))}${u}`;
+  if (L.mode === "log") {
+    const p = fractionAbove(st, L.iso), I = st.integral;
+    // WHY: for a charge density the share is also a number of electrons; an orbital density holds one electron
+    const of = signed ? (/ψ/.test(f.name) ? "∫|ψ|" : "∫|f|") : /^band/.test(f.name) ? "the orbital's electron" : "the total";
+    const count = !signed && f.unit === "e/Å³" && I > 0.5 ? ` (${(p * I).toFixed(I >= 100 ? 0 : 1)} of ${I.toFixed(I >= 100 ? 0 : 1)} e)` : "";
+    $("iso-hint").textContent = `${signed ? "±" : ""}${sup(fmt(L.iso))}${u} · encloses ${Math.round(100 * p)}% of ${of}${count}`;
+  } else $("iso-hint").textContent = `${sup(fmt(L.iso))}${u}`;
+  $("iso-note").textContent = levelNote(f);
   $("row-pm").hidden = !(L.mode === "log" && signed && st.min < -1e-6 * st.maxAbs);
   const I = st.integral, fi = Math.abs(I) >= 100 ? I.toFixed(2) : +I.toPrecision(5) + "";
   const m = L.mesh, ord = n => n + (["th", "st", "nd", "rd"][n] || "th");
@@ -944,6 +984,7 @@ function updateTools() {
   if (!L) return;
   $("tools-for").textContent = `${itemOf(L).name} · ${st.species.length} atoms`;
   $("t-prim").disabled = $("t-conv").disabled = !(st.pbc && st.lattice);
+  updateSymmetry();
 }
 $("layers").addEventListener("click", e => {
   const row = e.target.closest(".layer");
@@ -1220,10 +1261,10 @@ function showHome() {
 }
 /** Samples on the opening page (examples/, see examples/README.md for each file's source); h3d is computed. */
 const SAMPLES = {
-  rutile: "rutile-TiO2.cif", sto: "SrTiO3.vasp", zno: "ZnO-wurtzite.xsf", graphene: "graphene.pw.in", nacl: "NaCl.geometry.in", c60: "C60.xyz",
-  ethanol: "ethanol.pdb", pwo: "Si.pwscf.out", si: "Si-model.CHGCAR", elf: "C4.ELFCAR.gz", locpot: "Li.LOCPOT.gz", n2: "N2.WAVECAR",
-  benzene: "benzene-pi.cube", outcar: "Li-relax.OUTCAR", vasprun: "Si64-md.vasprun.xml.gz", fe2o3: "Fe2O3-molten.XDATCAR", castep: "Ar-LJ.md",
-  cu55: "Cu55-900K.traj", pt13: "Pt13-relax.extxyz", al: "Al-800K.XDATCAR", ag: "Ag-1600K.lammpstrj", ni: "Ni100-adatom-1100K.axsf",
+  rutile: "rutile-TiO2.cif", sto: "SrTiO3.vasp", zno: "ZnO-wurtzite.xsf", graphene: { file: "graphene.pw.in", reps: [2, 2, 1] }, nacl: "NaCl.geometry.in", c60: "C60.xyz",
+  ethanol: "ethanol.pdb", si: "Si-model.CHGCAR", elf: "C4.ELFCAR.gz", locpot: "Li.LOCPOT.gz", n2: "N2.WAVECAR", benzene: "benzene-pi.cube",
+  vasprun: "LGPS-800K.vasprun.xml.gz", outcar: "LiPON-relax.OUTCAR.gz", lisi: "LiSi-md.XDATCAR", pwmd: "Si8-md.pw.out", castep: "Si-relax.geom",
+  cu55: "Cu55-900K.traj", pt38: "Pt38-relax.extxyz", al: "Al-800K.XDATCAR", ag: "Ag-1600K.lammpstrj", ni: "Ni100-adatom-1100K.axsf",
 };
 async function example(id) {
   busy(true);
@@ -1233,11 +1274,16 @@ async function example(id) {
       await addItem({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })), example: "h3d" }, false);
       return;
     }
-    const name = SAMPLES[id];
+    const spec = SAMPLES[id], name = spec && (spec.file || spec);
     if (!name) throw new Error(`There is no sample called "${id}".`);
     const r = await fetch("examples/" + name);
     if (!r.ok) throw new Error(`Could not load the sample (${r.status}).`);
     await openFiles([new File([await r.blob()], name)], "replace");
+    if (spec.reps) {
+      // a sample shown as a supercell (graphene 2 x 2)
+      S.reps = spec.reps.slice(); ["ra", "rb", "rc"].forEach((k, i) => ($(k).value = S.reps[i]));
+      buildStructure(); fit(); refreshSurfaces(); summaries(); requestRender();
+    }
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
 }
@@ -1322,6 +1368,7 @@ for (const [i, id] of ["fx", "fy", "fz"].entries()) $(id).addEventListener("chan
 });
 $("shift-reset").addEventListener("click", () => setShift([0, 0, 0]));
 $("t-prim").addEventListener("click", () => derive("primitive"));
+$("t-tol").addEventListener("change", updateSymmetry);
 $("t-conv").addEventListener("click", () => derive("conventional"));
 for (const b of document.querySelectorAll("[data-fmt]")) b.addEventListener("click", () => exportLayer(b.dataset.fmt));
 $("field").addEventListener("change", e => { const L = activeField(); if (!L) return; L.fi = +e.target.value; initLevel(L, true); syncFieldUI(); buildLayersUI(); requestSurface(L); });

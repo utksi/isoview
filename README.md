@@ -31,7 +31,9 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   points): periodic data by Fourier interpolation, which is exact for plane-wave densities and potentials and keeps
   the integral; other grids (cube) by cubic interpolation. WAVECAR orbitals are built on a larger FFT box, which is
   exact. The stats line gives the grid as read and the one drawn. The level slider is logarithmic for densities and orbitals and linear for potentials and ELF.
-  The readout gives the share of the charge (or of ∫|f| for signed fields) inside the surface.
+  The readout gives the share of the charge (or of ∫|f| for signed fields) inside the surface, and for a charge
+  density also the number of electrons there; a short note under it says how to read the level for that kind of
+  field (density, signed field, potential, ELF).
   Signed fields show a positive and a negative surface.
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
@@ -93,6 +95,9 @@ blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
   ENCUT and checked against the stored count). They are the smooth part of the PAW orbitals, normalised to one
   electron; the augmentation inside the PAW spheres is not included.
 - Bonds join atoms closer than reach × (R₁ + R₂), with covalent radii from Cordero et al. (2008).
+- The space group next to the file name comes from [moyo](https://github.com/spglib/moyo) (by the spglib
+  developers; its WebAssembly build is in `js/vendor/moyo`, MIT or Apache-2.0), at the same tolerance as the cell tools
+  (0.01 Å by default). For a trajectory it is that of the frame shown; molecules without a cell get none.
 
 ## Develop
 

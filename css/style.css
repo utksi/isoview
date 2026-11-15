@@ -341,3 +341,6 @@ body.has-player #toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 .pill .acts { display: inline-flex; gap: 4px; align-items: center; padding-left: 8px; border-left: 1px solid var(--line); }
 .pill button.warn { color: var(--err); }
 .pill button.link-btn { background: none; color: var(--accent); padding: 4px 6px; }
+/* space group of the chosen structure, between the file name and New scene */
+.sgchip { flex: none; font: 12px var(--mono); color: var(--ink); padding: 2px 9px; border: 1px solid var(--line2); border-radius: 999px; white-space: nowrap; background: var(--panel); }
+.iso-note { margin: 2px 0 0; line-height: 1.45; }

@@ -15,11 +15,12 @@ Fields (model data, not DFT):
 Trajectories (effective-medium theory, ase.calculators.emt; energies in eV relative to the bulk fcc metals, so a
 cluster's energy is positive):
   Cu55 icosahedron at 900 K: Langevin dynamics, 5 fs steps, friction 0.02, every 4th of 400 steps (ASE .traj).
-  Al fcc 3x3x3 (108 atoms) at 800 K: Langevin, 5 fs, every 5th of 300 steps (XDATCAR, fixed cell).
-  Pt13 icosahedron, rattled by 0.25 A, relaxed with BFGS to fmax 0.02 eV/A, every step (extended XYZ, energy=).
-  Ag fcc 3x3x3 (108 atoms) at 1600 K: Langevin, 5 fs, every 8th of 400 steps (LAMMPS text dump, wrapped x y z).
+  Al fcc 3x3x3 (108 atoms) at 800 K: Langevin, 5 fs, every 5th of 600 steps (XDATCAR, fixed cell), 121 frames.
+  Pt38 truncated octahedron melted at 1400 K (1 ps of Langevin dynamics), then relaxed with FIRE (max step 0.1 A)
+    to fmax 0.005 eV/A, every step (extended XYZ, energy=), 104 frames.
+  Ag fcc 3x3x3 (108 atoms) at 1600 K: Langevin, 5 fs, every 8th of 960 steps (LAMMPS text dump, wrapped x y z).
   Ni(100) slab 3x3x4 with an adatom in a hollow site at 1100 K, bottom two layers fixed: Langevin, 5 fs, every
-    8th of 400 steps (animated XSF).
+    8th of 960 steps (animated XSF).
 Random seeds are fixed, so the files are reproducible. Run: OMP_NUM_THREADS=1 python tools/make_samples.py (needs ase,
 numpy).
 """
@@ -27,7 +28,7 @@ import os
 import numpy as np
 from ase import Atoms
 from ase.build import bulk, molecule, fcc100, add_adsorbate
-from ase.cluster import Icosahedron
+from ase.cluster import Icosahedron, Octahedron
 from ase.calculators.emt import EMT
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.constraints import FixAtoms
@@ -35,7 +36,7 @@ from ase.io import write
 from ase.io.trajectory import Trajectory
 from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
-from ase.optimize import BFGS
+from ase.optimize import FIRE
 from ase import units
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples")
@@ -180,11 +181,13 @@ def main():
         for a in fr:
             t.write(a)
     al = bulk("Al", "fcc", a=4.05, cubic=True) * (3, 3, 3)
-    write(p("Al-800K.XDATCAR"), run_md(al, 800, 300, 5, seed=21), format="vasp-xdatcar")
-    pt = Icosahedron("Pt", 2)
+    write(p("Al-800K.XDATCAR"), run_md(al, 800, 600, 5, seed=21), format="vasp-xdatcar")
+    pt = Octahedron("Pt", 4, cutoff=1)
     pt.center(vacuum=6.0)
-    pt.rattle(0.25, seed=31)
     pt.calc = EMT()
+    MaxwellBoltzmannDistribution(pt, temperature_K=1400, rng=np.random.default_rng(61))
+    Langevin(pt, 5 * units.fs, temperature_K=1400, friction=0.02, rng=np.random.default_rng(62)).run(200)
+    pt.arrays.pop("momenta", None)
     relax = []
 
     def keep():
@@ -192,17 +195,17 @@ def main():
         a.calc = SinglePointCalculator(a, energy=pt.get_potential_energy())
         relax.append(a)
 
-    opt = BFGS(pt, logfile=None)
+    opt = FIRE(pt, maxstep=0.1, logfile=None)
     opt.attach(keep, interval=1)  # also called before the first step
-    opt.run(fmax=0.02)
-    write(p("Pt13-relax.extxyz"), relax, format="extxyz")
+    opt.run(fmax=0.005)
+    write(p("Pt38-relax.extxyz"), relax, format="extxyz")
     ag = bulk("Ag", "fcc", a=4.09, cubic=True) * (3, 3, 3)
-    lammps_dump(p("Ag-1600K.lammpstrj"), run_md(ag, 1600, 400, 8, seed=41), 8)
+    lammps_dump(p("Ag-1600K.lammpstrj"), run_md(ag, 1600, 960, 8, seed=41), 8)
     ni = fcc100("Ni", size=(3, 3, 4), vacuum=6.0)
     add_adsorbate(ni, "Ni", 1.7, "hollow")
     ni.set_constraint(FixAtoms(indices=[i for i, z in enumerate(ni.positions[:, 2]) if z < ni.positions[:, 2].min() + 2.0]))
-    write(p("Ni100-adatom-1100K.axsf"), run_md(ni, 1100, 400, 8, seed=51), format="xsf")
-    print("Si model density integrates to %.4f e; Pt13 relaxation %d frames" % (total, len(relax)))
+    write(p("Ni100-adatom-1100K.axsf"), run_md(ni, 1100, 960, 8, seed=51), format="xsf")
+    print("Si model density integrates to %.4f e; Pt38 relaxation %d frames" % (total, len(relax)))
     for f in sorted(os.listdir(OUT)):
         print("%8.1f kB  %s" % (os.path.getsize(p(f)) / 1024, f))
 

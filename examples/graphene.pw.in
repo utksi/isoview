@@ -1,4 +1,4 @@
-! Graphene, a = 2.46 A, 14.8 A vacuum; hexagonal lattice from ibrav = 4.
+! Graphene, a = 2.46 A, 14.8 A vacuum with the layer in the middle; hexagonal lattice from ibrav = 4.
 &CONTROL
   calculation = 'scf'
   prefix = 'graphene'
@@ -16,7 +16,7 @@
 ATOMIC_SPECIES
   C  12.011  C.pbe-n-kjpaw_psl.1.0.0.UPF
 ATOMIC_POSITIONS {crystal}
-  C  0.000000000  0.000000000  0.0
-  C  0.333333333  0.666666667  0.0
+  C  0.000000000  0.000000000  0.5
+  C  0.333333333  0.666666667  0.5
 K_POINTS {automatic}
   12 12 1 0 0 0

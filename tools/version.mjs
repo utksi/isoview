@@ -17,7 +17,7 @@ for (const f of ["index.html", ...walk("js")]) {
   const p = path.join(root, f), s = fs.readFileSync(p, "utf8");
   const t = s
     .replace(/((?:from|import\()\s*"\.{1,2}\/[^"?]+\.js)(?:\?v=\d+)?"/g, `$1?v=${v}"`)
-    .replace(/(new URL\("\.\/worker\.js)(?:\?v=\d+)?"/g, `$1?v=${v}"`)
+    .replace(/(new URL\("\.\/[^"?]+\.(?:js|wasm))(?:\?v=\d+)?"/g, `$1?v=${v}"`)
     .replace(/((?:href|src)="(?:css\/style\.css|js\/app\.js))(?:\?v=\d+)?"/g, `$1?v=${v}"`);
   if (t !== s) { fs.writeFileSync(p, t); changed++; }
 }

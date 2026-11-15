@@ -14,9 +14,9 @@
  * or alat and Ry; CASTEP .md/.geom in Bohr and Hartree; GROMACS .gro in nm. Conversions: BOHR = 0.529177210903 A,
  * Ry = 13.605693122994 eV, Ha = 2 Ry, nm = 10 A.
  */
-import { Cursor, tokens } from "./numbers.js?v=11";
-import { elementOf, SYMBOLS } from "./elements.js?v=11";
-import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=11";
+import { Cursor, tokens } from "./numbers.js?v=13";
+import { elementOf, SYMBOLS } from "./elements.js?v=13";
+import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=13";
 
 const RY = 13.605693122994; // eV
 const HA = 2 * RY; // eV
@@ -81,7 +81,8 @@ function xdatHeader(cur) {
 
 /**
  * XDATCAR: a header, then blocks "Direct configuration= k" of nat fractional positions. Variable-cell runs repeat
- * the header before every block.
+ * the header before every block. Position lines may carry more columns (pymatgen appends the element); the first
+ * three numbers are used.
  */
 export function parseXDATCAR(text) {
   const cur = new Cursor(text), frames = [], cells = [], notes = [];
@@ -91,10 +92,20 @@ export function parseXDATCAR(text) {
     if (l === null) break;
     if (/configuration/i.test(l)) {
       if (!h) throw new Error("XDATCAR: a configuration before the header");
-      const nat = h.species.length;
+      const nat = h.species.length, at = cur.pos;
       let v;
-      try { v = cur.numbers(3 * nat, new Float64Array(3 * nat)); } catch (e) { notes.push("the last configuration is incomplete and was skipped"); break; }
-      if (Array.prototype.some.call(v, x => Number.isNaN(x))) { notes.push("a configuration with unreadable numbers ends the trajectory"); break; }
+      try { v = cur.numbers(3 * nat, new Float64Array(3 * nat)); } catch (e) { v = null; }
+      if (!v || Array.prototype.some.call(v, x => Number.isNaN(x))) {
+        // lines with more than three columns (pymatgen appends the element): take the first three numbers per line
+        cur.pos = at; v = new Float64Array(3 * nat);
+        let okC = true;
+        for (let i = 0; i < nat && okC; i++) {
+          const t = tokens(cur.line() ?? "");
+          if (t.length < 3 || t.slice(0, 3).some(x => !Number.isFinite(+x))) okC = false;
+          else { v[3 * i] = +t[0]; v[3 * i + 1] = +t[1]; v[3 * i + 2] = +t[2]; }
+        }
+        if (!okC) { notes.push(frames.length ? "the last configuration is incomplete and was skipped" : "XDATCAR: unreadable positions"); break; }
+      }
       frames.push(/^\s*c/i.test(l) ? v : fracArray(h.L, v)); cells.push(h.L);
       continue;
     }
@@ -346,7 +357,9 @@ export function parseQEout(text) {
     species.push(elementOf(m[1])); p0.push(...m[2].trim().split(/\s+/).map(x => +x * alat));
   }
   const nat = species.length, frames = [Float64Array.from(p0)], cells = [L];
-  const re = /^\s*(CELL_PARAMETERS|ATOMIC_POSITIONS)\s*[({]?\s*([^)}\n]*)[)}]?.*$|Begin final coordinates|End final coordinates/gm;
+  // WHY: the card name alone on its line, optionally with (unit) or {unit}: QE also prints messages that start with
+  // the card name ("ATOMIC_POSITIONS: units set to alat"), which are not blocks
+  const re = /^[ \t]*(CELL_PARAMETERS|ATOMIC_POSITIONS)[ \t]*(?:[({][ \t]*([^)}\n]*)[)}])?[ \t]*$|Begin final coordinates|End final coordinates/gm;
   let m, final = false;
   while ((m = re.exec(text))) {
     if (m[0].includes("Begin final")) { final = true; continue; }
