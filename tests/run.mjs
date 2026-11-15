@@ -381,5 +381,13 @@ if (env.ISOVIEW_WAVECAR) {
   const x = parseText("xyz", toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 }));
   ok(/energy=-10\.5/.test(toXYZ(read("t.extxyz").structure, "t", { energy: -10.5 })) && x.structure.species.length === 8, "extended XYZ export carries energy=");
 }
+/* deploy: every module is in the import map, all with the version of app.js (no stale cached module after a deploy) */
+{
+  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const map = JSON.parse(html.match(/<script type="importmap">([^<]+)<\/script>/)[1]).imports, v = html.match(/js\/app\.js\?v=(\d+)/)[1];
+  const files = [...fs.readdirSync(new URL("../js", import.meta.url)).filter(f => f.endsWith(".js")).map(f => "./js/" + f), ...fs.readdirSync(new URL("../js/gfx", import.meta.url)).filter(f => f.endsWith(".js")).map(f => "./js/gfx/" + f)];
+  const bad = files.filter(f => map[f] !== `${f}?v=${v}`);
+  ok(!bad.length && html.includes(`css/style.css?v=${v}`), `import map versions all ${files.length} modules as v${v}${bad.length ? "; missing or stale: " + bad.join(", ") : ""}`);
+}
 console.log(`\n${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);
