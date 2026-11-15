@@ -24,7 +24,7 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 
 ## Using it
 
-- **Structure**: ball-and-stick, space filling or sticks; bond reach; supercell repeat; atoms on cell faces; the cell
+- **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
   or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
 - **Surface**: coarse grids are drawn on a finer grid so surfaces are smooth (a step of at most 0.1 Å, up to 4 M

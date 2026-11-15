@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=13";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=13";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=13";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=13";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=13";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=13";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=13";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=13";
-import { measureAll } from "./measure.js?v=13";
-import { GifWriter, buildPalette } from "./gif.js?v=13";
-import * as store from "./store.js?v=13";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=14";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=14";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=14";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=14";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=14";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=14";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=14";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=14";
+import { measureAll } from "./measure.js?v=14";
+import { GifWriter, buildPalette } from "./gif.js?v=14";
+import * as store from "./store.js?v=14";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -49,6 +49,7 @@ const S = {
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
   frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "classic",
 };
+const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
 const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
 let nextItem = 1, nextLayer = 1;
@@ -104,7 +105,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=13", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=14", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1045,6 +1046,8 @@ function clearScene() {
   S.frame = 0; S.playing = false;
   S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
+  // a new scene starts from the default bond reach unless "keep" (next to it) is on
+  if (!$("tol-keep").checked) { S.tol = TOL0; $("tol").value = TOL0; $("tol-out").textContent = TOL0.toFixed(2); }
   if (R) R.clearMeshes();
   setLabelMode(false); setBoxMode(false);
 }
@@ -1354,6 +1357,8 @@ $("bands").addEventListener("keydown", e => {
 $("scale").addEventListener("input", e => { S.scale = +e.target.value; buildStructure(); });
 $("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = !S.bonds; buildStructure(); });
 $("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").textContent = S.tol.toFixed(2); buildStructure(); });
+$("tol-keep").addEventListener("change", e => { try { localStorage.setItem("isoview-keep-reach", e.target.checked ? "1" : "0"); } catch (err) { /* storage unavailable */ } });
+try { $("tol-keep").checked = localStorage.getItem("isoview-keep-reach") === "1"; } catch (e) { /* storage unavailable */ }
 $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStructure(); });
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {

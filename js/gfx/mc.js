@@ -12,7 +12,7 @@
  * Output { positions: Float32Array(3V), normals: Int16Array(4V) (snorm16 x, y, z, 0), indices: Uint32Array(3T),
  * truncated } with at most maxTris triangles.
  */
-import { EDGE, COUNT, TRI } from "./mctables.js?v=13";
+import { EDGE, COUNT, TRI } from "./mctables.js?v=14";
 
 /** Growable typed array. */
 class Buf {

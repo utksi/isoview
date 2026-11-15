@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=13">
+<link rel="stylesheet" href="css/style.css?v=14">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -61,7 +61,7 @@
       <div class="row col"><span class="lab">Look</span><div class="seg wide" data-key="look"><button type="button" value="classic" title="Lit spheres with a highlight">Classic</button><button type="button" value="soft" title="Soft light from above and depth fog, as in many papers">Soft</button><button type="button" value="glossy" title="Strong highlights and a bright rim">Glossy</button><button type="button" value="toon" title="Cartoon: three tones, a highlight dot and outlines">Toon</button><button type="button" value="outline" title="Flat colours with ink outlines, like a drawing">Outline</button></div></div>
       <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
-      <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output></div></div>
+      <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output><label class="keep" title="Keep this bond reach when you open another file (otherwise it returns to 1.15)"><input type="checkbox" id="tol-keep">keep</label></div></div>
       <div class="row has-cell"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
       <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
       <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
@@ -168,6 +168,6 @@
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=13"></script>
+<script type="module" src="js/app.js?v=14"></script>
 </body>
 </html>
