@@ -1,7 +1,8 @@
 # isoview
 
-Crystal structures and volumetric data in the browser. Open a file, turn it around, pick an isovalue, click atoms to
-measure them. Everything runs locally: files are read on your device and never uploaded.
+Visualize, edit and create crystal structures and volumetric data, in the browser. Open a file, turn it around, pick
+an isovalue, click atoms to measure them, cut and shift the cell, and save what you made. Everything runs locally:
+files are read on your device and never uploaded.
 
 **Open it:** https://utkarsh.science/isoview/
 
@@ -19,7 +20,7 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 ## Using it
 
 - **Structure**: ball-and-stick, space filling or sticks; bond reach; supercell repeat; atoms on cell faces.
-  Alkali and heavy alkaline-earth cations are drawn without bonds unless you switch them on.
+  Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
 - **Surface**: the level slider is logarithmic for densities and orbitals and linear for potentials and ELF.
   The readout gives the share of the charge (or of ∫|f| for signed fields) inside the surface.
   Signed fields show a positive and a negative surface.
@@ -28,19 +29,30 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 - **Layers**: every file adds layers (its atoms, its field). Drag files onto the right half of the window, or use
   "Add files to the scene", to superimpose them: a PARCHG on a CHGCAR, a CONTCAR on a WAVECAR, two orbitals from
   different runs. Each field layer has its own level, opacity and colours; layers can be hidden or removed.
-- **Shift origin** by fractions (fx, fy, fz) of the cell: atoms and fields move together. Periodic fields (CHGCAR,
-  WAVECAR, periodic XSF) shift exactly, by whole grid steps plus a sub-step origin offset. With one atom selected,
-  Center moves it to the middle of the cell.
+  Under the list, for the chosen structure (click its row):
+  - **Primitive cell** and **Conventional cell** add the reduced cell as a new layer (the original is hidden, and
+    Undo removes it). Both work from supercells: a 3×3×3 rock-salt supercell gives the 2-atom primitive and the
+    8-atom cubic cell, also with positional noise below the tolerance (copies are averaged). The conventional cell
+    follows the lattice's own symmetry (cubic, tetragonal, hexagonal, rhombohedral as its triple hexagonal cell,
+    orthorhombic with the centred face as C, monoclinic, triclinic).
+  - **Export as shown** saves the structure as you see it (shift, deletions and supercell applied) as POSCAR, CIF or
+    extended XYZ.
 - **Measure**: click two atoms for their distance, three for the angle at the middle one, four for the dihedral.
   Click empty space to clear.
-- **Edit**: Shift + drag (or the box tool) selects the atoms in a box. Delete removes the selected atoms (in every
-  periodic image); Cut surface removes the isosurface inside the box (the region stays fixed as you rotate).
-  Ctrl/⌘ Z undoes deletions, cuts, shifts and removed layers. Export POSCAR saves the edited, shifted structure.
+- **Edit** (its own panel): draw a region around atoms with Shift + drag (or switch on "Draw a region"); the region
+  is freehand, not a box. Delete removes the selected atoms in every periodic image; Cut surface removes the
+  isosurface inside the region (the region stays fixed as you rotate), and Restore the surface brings it back.
+  **Shift origin** moves atoms and fields together by fractions of a, b, c; periodic fields (CHGCAR, WAVECAR,
+  periodic XSF) shift exactly, by whole grid steps plus a sub-step origin offset. Center on atom puts one selected
+  atom in the middle of the cell. The Undo button (or Ctrl/⌘ Z) names what it will undo: deletions, cuts, shifts,
+  removed layers, derived cells.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
 - **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
-  vector, `L` labels, `S` save a PNG, `Del` delete, `Esc` clear. Right-drag pans. The isoview wordmark returns to the
-  opening page.
+  vector, `L` labels, `S` save a PNG, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
+  wordmark returns to the opening page.
+- **Hide**: each corner (title, panel, axes and cell, view buttons) has a small eye at the very corner that tucks it
+  away; `H` hides or shows all four. The panel never scrolls sideways; its rows wrap to fit.
 
 ## How it draws
 

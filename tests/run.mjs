@@ -9,12 +9,13 @@
  */
 import fs from "node:fs";
 import { readNumbers } from "../js/numbers.js";
-import { SYMBOLS, elementOf, rcov, colorOf } from "../js/elements.js";
-import { fromParams, params, det3, formula, norm, dot } from "../js/lattice.js";
+import { SYMBOLS, elementOf, rcov, colorOf, SPACERS } from "../js/elements.js";
+import { fromParams, params, det3, formula, norm, dot, fracToCart } from "../js/lattice.js";
 import { parseText, detectKind, parseSymop, qeLattice, isWavecarHeader } from "../js/formats.js";
 import { fft1 } from "../js/fft.js";
-import { stats, renderGrid, isoForFraction, fractionAbove } from "../js/field.js";
-import { displayAtoms, bondList, deleteAtoms, atomId, toPOSCAR } from "../js/structure.js";
+import { stats, renderGrid, isoForFraction, fractionAbove, insidePolygon } from "../js/field.js";
+import { displayAtoms, bondList, deleteAtoms, atomId, toPOSCAR, shownStructure, toCIF, toXYZ } from "../js/structure.js";
+import { primitive, conventional } from "../js/symmetry.js";
 import { Wavecar } from "../js/wavecar.js";
 import { marchingCubes } from "../js/gfx/mc.js";
 import { Camera, qfromRows, qmat, pickSphere } from "../js/gfx/camera.js";
@@ -125,6 +126,12 @@ for (const len of [8, 7, 12]) {
   ok(at.length === 8, "boundary atoms: corner atom drawn at the 8 cube corners");
   const b = bondList(displayAtoms({ lattice: null, pbc: false, species: ["O", "H", "H"], pos: Float64Array.from([0, 0, 0, 0.96, 0, 0, -0.24, 0.93, 0]) }));
   ok(b.length === 2, "bonds: water has two O-H bonds and no H-H bond");
+  // spacer rule: rock salt NaCl keeps Na-Cl bonds (nothing else bonds); CsPbCl3 drops Cs-Cl and keeps Pb-Cl
+  const nacl = { lattice: [[5.64, 0, 0], [0, 5.64, 0], [0, 0, 5.64]], pbc: true, species: ["Na", "Cl"], pos: Float64Array.from([0, 0, 0, 2.82, 0, 0]) };
+  const bn = bondList(displayAtoms(nacl, { reps: [2, 2, 2], boundary: false }), { spacers: SPACERS });
+  const a0 = 5.6, cspb = { lattice: [[a0, 0, 0], [0, a0, 0], [0, 0, a0]], pbc: true, species: ["Cs", "Pb", "Cl", "Cl", "Cl"], pos: Float64Array.from([0, 0, 0, a0 / 2, a0 / 2, a0 / 2, 0, a0 / 2, a0 / 2, a0 / 2, 0, a0 / 2, a0 / 2, a0 / 2, 0]) };
+  const da = displayAtoms(cspb, { reps: [1, 1, 1], boundary: true }), bc = bondList(da, { spacers: SPACERS });
+  ok(bn.length > 0 && bc.length === 6 && bc.every(([i, j]) => da[i].el !== "Cs" && da[j].el !== "Cs"), "bonds: spacer cations bonded only when nothing else is (NaCl yes, Cs in CsPbCl3 no)");
 }
 /* WAVECAR header detection */
 {
@@ -239,6 +246,61 @@ for (const len of [8, 7, 12]) {
   await handle({ op: "drop", ds: a.result.ds });
   let threw = false; try { await handle({ op: "mesh", ds: a.result.ds, fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.01] }); } catch (e) { threw = true; }
   ok(threw, "a dropped dataset is gone");
+}
+
+/* symmetry: primitive and conventional cells */
+{
+  const mk = (L, sp, F) => ({ lattice: L, pbc: true, species: sp, pos: Float64Array.from(F.flatMap(f => fracToCart(L, f))) });
+  const cub = a => [[a, 0, 0], [0, a, 0], [0, 0, a]];
+  const cu = mk(cub(3.615), ["Cu", "Cu", "Cu", "Cu"], [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]]);
+  const p = primitive(cu), c = conventional(p.structure);
+  ok(p.n === 4 && p.structure.species.length === 1 && near(params(p.structure.lattice)[3], 60, 1e-6), "fcc: primitive cell 1 atom, 60 degree rhombohedron");
+  ok(c.system === "cubic" && c.structure.species.length === 4 && near(params(c.structure.lattice)[0], 3.615, 1e-6), "fcc primitive -> conventional cubic, 4 atoms");
+  const nacl = mk(cub(5.64), ["Na", "Na", "Na", "Na", "Cl", "Cl", "Cl", "Cl"], [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5]]);
+  ok(primitive(nacl).structure.species.length === 2 && conventional(nacl).structure.species.length === 8, "NaCl: primitive 2, conventional 8");
+  const rut = parseText("cif", fs.readFileSync(new URL("../examples/rutile-TiO2.cif", import.meta.url), "utf8")).structure, cr = conventional(rut);
+  ok(primitive(rut).n === 1 && cr.system === "tetragonal" && near(params(cr.structure.lattice)[2], 2.9587, 1e-6), "rutile: primitive, conventional tetragonal");
+  const rh = conventional(mk(fromParams(4, 4, 4, 70, 70, 70), ["Bi"], [[0, 0, 0]]));
+  ok(rh.system === "rhombohedral" && rh.z === 3 && near(params(rh.structure.lattice)[5], 120, 1e-6), "rhombohedral lattice -> hexagonal triple cell");
+  const oc = conventional(mk([[3, 0, 0], [0, 4, 0], [0, 0, 5]], ["C", "C"], [[0, 0, 0], [0.5, 0.5, 0]]));
+  ok(oc.system === "orthorhombic" && oc.structure.species.length === 2 && params(oc.structure.lattice).slice(0, 3).map(x => +x.toFixed(6)).join() === "3,4,5", "C-centred orthorhombic -> 3 x 4 x 5 C cell");
+  // supercells: a 3x3x3 NaCl supercell (216 atoms), exact and with ${noise} A noise, reduces to 2 / 8 atoms
+  const sc = (st, r, noise = 0) => {
+    const L = st.lattice, sp = [], pos = [];
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2 * noise;
+    for (let i = 0; i < st.species.length; i++) for (let a = 0; a < r; a++) for (let b = 0; b < r; b++) for (let c = 0; c < r; c++) {
+      sp.push(st.species[i]);
+      pos.push(...[0, 1, 2].map(k => st.pos[3 * i + k] + a * L[0][k] + b * L[1][k] + c * L[2][k] + rnd()));
+    }
+    return { lattice: L.map(v => v.map(x => x * r)), pbc: true, species: sp, pos: Float64Array.from(pos) };
+  };
+  for (const [noise, tol] of [[0, 0.01], [0.002, 0.01], [0.004, 0.02]]) {
+    const big = sc(nacl, 3, noise), pp = primitive(big, tol), cc = conventional(big, tol);
+    ok(big.species.length === 216 && pp.structure.species.length === 2 && pp.n === 108 && cc.system === "cubic" && cc.structure.species.length === 8 && near(params(cc.structure.lattice)[0], 5.64, 0.01),
+      `NaCl 3x3x3 supercell${noise ? ` with ${noise} A noise (tol ${tol} A)` : ""}: primitive 2 atoms (108 lattice points), conventional cubic 8 atoms, a = ${params(cc.structure.lattice)[0].toFixed(4)} A`);
+  }
+  // noise beyond the tolerance: no translation is accepted, the cell is reported as it is (no error)
+  const loose = sc(nacl, 3, 0.004), lp = primitive(loose, 0.005);
+  ok(lp.n === 1 && lp.structure.species.length === 216, "noise beyond the tolerance: the supercell is kept as it is, without an error");
+
+}
+/* export as shown: shift and supercell applied, CIF and XYZ read back */
+{
+  const st = { lattice: [[4, 0, 0], [0, 4, 0], [0, 0, 4]], pbc: true, species: ["Na", "Cl"], pos: Float64Array.from([0, 0, 0, 2, 0, 0]) };
+  const sh = shownStructure(st, [1, 0, 0], [2, 1, 1]);
+  ok(sh.species.length === 4 && near(det3(sh.lattice), 128, 1e-9) && near(sh.pos[0], 1, 1e-12) && near(sh.pos[3], 5, 1e-12), "shown structure: translated by 1 A, 2x1x1 supercell");
+  const c = parseText("cif", toCIF(sh, "t")).structure, x = parseText("xyz", toXYZ(sh, "t")).structure, v = parseText("vasp", toPOSCAR(sh, [0, 0, 0], "t")).structure;
+  ok([c, x, v].every(t => t.species.length === 4 && near(det3(t.lattice), 128, 1e-6)) && near(c.pos[0], 1, 1e-6) && near(x.pos[0], 1, 1e-6), "CIF, extended XYZ and POSCAR exports read back");
+}
+/* freehand cut: an L-shaped polygon masks only its own area */
+{
+  const f = { n: [4, 4, 2], data: new Float32Array(32).fill(1), origin: [0, 0, 0], span: [[3, 0, 0], [0, 3, 0], [0, 0, 1]], periodic: false, closed: false };
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const poly = [-0.5, -0.5, 2.5, -0.5, 2.5, 0.5, 0.5, 0.5, 0.5, 2.5, -0.5, 2.5];
+  const g = renderGrid(f, [1, 1, 1], 1, [0, 0, 0], [{ m: I, poly }]);
+  const masked = [...new Set([...g.data].map((v, k) => (Number.isNaN(v) ? `${k % 4},${Math.floor(k / 4) % 4}` : null)).filter(Boolean))];
+  ok(masked.length && [...g.data].filter(Number.isNaN).length === 10 && masked.sort().join(" ") === "0,0 0,1 0,2 1,0 2,0" && insidePolygon(poly, 2, 0) && !insidePolygon(poly, 2, 2), "freehand (L-shaped) cut masks only the points inside");
 }
 
 /* optional: real files */

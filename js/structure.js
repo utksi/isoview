@@ -6,8 +6,10 @@
  * Periodic structures: fractional coordinates are wrapped into [0, 1) (values within eps of 1 map to 0), repeated
  * over the r_a x r_b x r_c supercell, and, with boundary atoms on, atoms on a cell face (fractional coordinate below
  * eps along an axis) are also drawn on the opposite face of the supercell (edges and corners by combination).
- * Bonds: atoms i, j are bonded when 0.1 A < |r_i - r_j| < tol (R_i + R_j), R = covalent radius; pairs involving an
- * element in `skip` are not bonded. Neighbours are found with a cubic cell list of edge = the largest cutoff.
+ * Bonds: atoms i, j are bonded when 0.1 A < |r_i - r_j| < tol (R_i + R_j), R = covalent radius. Pairs involving a
+ * spacer element (alkali and heavy alkaline-earth cations) are dropped when the other atoms form at least one bond among
+ * themselves (Cs in Cs2AgInCl6, Li in LiFePO4), and kept when they do not (NaCl, CaF2, Li2O would otherwise show no
+ * bonds at all). Neighbours are found with a cubic cell list of edge = the largest cutoff.
  */
 import { inv3, cartToFrac, fracToCart, det3 } from "./lattice.js";
 import { rcov } from "./elements.js";
@@ -32,8 +34,17 @@ export function displayAtoms(st, { reps = [1, 1, 1], boundary = true, eps = 1e-3
   return out;
 }
 
-/** Bonded index pairs [i, j] (i < j) among display atoms. */
-export function bondList(atoms, { tol = 1.15, skip = new Set() } = {}) {
+/** Bonded index pairs [i, j] (i < j) among display atoms; spacer pairs dropped as in the file header. */
+export function bondList(atoms, { tol = 1.15, spacers = new Set() } = {}) {
+  if (spacers.size && atoms.some(a => spacers.has(a.el))) {
+    const framework = pairs(atoms, tol, spacers);
+    if (framework.length) return framework;
+  }
+  return pairs(atoms, tol, new Set());
+}
+
+/** Pairs [i, j] (i < j) with 0.1 A < d_ij < tol (R_i + R_j), ignoring atoms whose element is in `skip`. */
+function pairs(atoms, tol, skip) {
   const n = atoms.length, R = atoms.map(a => rcov(a.el));
   let rmax = 0;
   for (let i = 0; i < n; i++) if (!skip.has(atoms[i].el) && R[i] > rmax) rmax = R[i];
@@ -102,5 +113,50 @@ export function toPOSCAR(st, shift = [0, 0, 0], title = "isoview") {
     coords = idx.map(i => [0, 1, 2].map(c => st.pos[3 * i + c] - lo[c] + 5));
   }
   for (const c of coords) lines.push(c.map(f9).join(" "));
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * The structure as shown, for export: atoms translated by the Cartesian vector t, wrapped into the cell (periodic)
+ * and repeated over the reps supercell (lattice rows scaled by reps); boundary duplicates are not included.
+ */
+export function shownStructure(st, t = [0, 0, 0], reps = [1, 1, 1]) {
+  if (!st.pbc || !st.lattice) {
+    const pos = Float64Array.from(st.pos, (x, k) => x + t[k % 3]);
+    return { ...st, pos };
+  }
+  const L = st.lattice, Li = inv3(L), species = [], pos = [];
+  for (let i = 0; i < st.species.length; i++) {
+    const f = cartToFrac(Li, [st.pos[3 * i] + t[0], st.pos[3 * i + 1] + t[1], st.pos[3 * i + 2] + t[2]]).map(x => { const y = x - Math.floor(x); return y > 1 - 1e-9 ? 0 : y; });
+    for (let a = 0; a < reps[0]; a++) for (let b = 0; b < reps[1]; b++) for (let c = 0; c < reps[2]; c++) {
+      pos.push(...fracToCart(L, [f[0] + a, f[1] + b, f[2] + c])); species.push(st.species[i]);
+    }
+  }
+  return { lattice: L.map((v, a) => v.map(x => x * reps[a])), pbc: true, species, pos: Float64Array.from(pos) };
+}
+
+/** CIF text in space group P 1 (cell lengths in A, angles in degrees, fractional coordinates). */
+export function toCIF(st, title = "isoview") {
+  if (!st.lattice) throw new Error("CIF needs a cell");
+  const [a, b, c] = st.lattice.map(v => Math.hypot(...v));
+  const an = (u, v) => Math.acos((u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (Math.hypot(...u) * Math.hypot(...v))) * 180 / Math.PI;
+  const L = st.lattice, Li = inv3(L), cnt = {};
+  const lines = [`# ${title.replace(/\s+/g, " ")}`, "data_isoview", `_cell_length_a ${a.toFixed(6)}`, `_cell_length_b ${b.toFixed(6)}`, `_cell_length_c ${c.toFixed(6)}`,
+    `_cell_angle_alpha ${an(L[1], L[2]).toFixed(4)}`, `_cell_angle_beta ${an(L[0], L[2]).toFixed(4)}`, `_cell_angle_gamma ${an(L[0], L[1]).toFixed(4)}`,
+    "_symmetry_space_group_name_H-M 'P 1'", "_symmetry_Int_Tables_number 1", "loop_", "_symmetry_equiv_pos_as_xyz", "'x, y, z'",
+    "loop_", "_atom_site_label", "_atom_site_type_symbol", "_atom_site_fract_x", "_atom_site_fract_y", "_atom_site_fract_z"];
+  st.species.forEach((s, i) => {
+    cnt[s] = (cnt[s] || 0) + 1;
+    const f = cartToFrac(Li, [st.pos[3 * i], st.pos[3 * i + 1], st.pos[3 * i + 2]]);
+    lines.push(`${s}${cnt[s]} ${s} ${f.map(x => x.toFixed(8)).join(" ")}`);
+  });
+  return lines.join("\n") + "\n";
+}
+
+/** Extended XYZ text: Lattice (A) and pbc in the comment line when the structure has a cell. */
+export function toXYZ(st, title = "isoview") {
+  const head = st.lattice ? `Lattice="${st.lattice.flat().map(x => x.toFixed(8)).join(" ")}" Properties=species:S:1:pos:R:3 pbc="${st.pbc ? "T T T" : "F F F"}" comment="${title.replace(/"/g, "'")}"` : title;
+  const lines = [String(st.species.length), head];
+  st.species.forEach((s, i) => lines.push(`${s.padEnd(3)} ${[0, 1, 2].map(c => st.pos[3 * i + c].toFixed(8).padStart(14)).join(" ")}`));
   return lines.join("\n") + "\n";
 }

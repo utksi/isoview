@@ -5,20 +5,22 @@
  * Scene: every loaded file group is an item (worker dataset ds, structure, fields, WAVECAR header); items give layers,
  * an atoms layer (structure) and a field layer (one shown field, its own level, opacity and colours). Layers can be
  * added to a scene ("Add to scene"), hidden and removed.
- * Origin shift (fx, fy, fz): applied to every layer in its own cell's fractional coordinates (structure.js for atoms,
- * field.js for fields, exact for periodic grids), so atoms and densities move together.
- * Selection: click atoms (toggle) or drag a box with Shift (or the box tool); 2-4 atoms give distances, angles at the
- * middle atoms and the dihedral (measure.js). A box also records a cut region (the view frustum through the box,
- * field.js) that "Cut surface" removes from the visible surfaces. Deleting removes the atom from its structure (all
+ * Origin shift: one Cartesian translation t for every layer, entered and shown as fractions (fx, fy, fz) of the main
+ * cell; each layer applies t in its own cell (structure.js for atoms, field.js for fields, exact for periodic grids),
+ * so atoms, densities and derived cells (primitive, conventional: symmetry.js) move together.
+ * Selection: click atoms (toggle) or draw a region with Shift + drag (or the region tool); 2-4 atoms give distances,
+ * angles at the middle atoms and the dihedral (measure.js). A region also records a cut (the view frustum through the
+ * drawn polygon, field.js) that "Cut surface" removes from the visible surfaces. Deleting removes the atom from its structure (all
  * periodic images). Deletions, cuts, shifts and layer removals can be undone.
  * Level slider: log10 |iso| over six decades below max |f| (densities, signed fields; signed fields get +iso and -iso
  * surfaces), linear over [min, max] (potentials, ELF); the readout is the share of sum |f| inside the surface.
  * Frames are drawn on demand. Label mode (L) puts element symbols on clicked atoms (gfx/labels.js).
  */
 import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js";
-import { fractionAbove, isoForFraction, autoStride } from "./field.js";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR } from "./structure.js";
-import { colorOf, rcov, IONIC_CATIONS } from "./elements.js";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js";
+import { primitive, conventional } from "./symmetry.js";
+import { colorOf, rcov, SPACERS } from "./elements.js";
 import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js";
 import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js";
 import { buildAtlas, packLabels } from "./gfx/labels.js";
@@ -31,8 +33,8 @@ const qp = new URLSearchParams(location.search);
 const FIELD_COLORS = [["#e3a03a", "#3b86d6"], ["#2bb3a3", "#e0607e"], ["#9b7be0", "#7cb342"], ["#ef7d4b", "#5c9bd6"]];
 
 const S = {
-  items: new Map(), layers: [], active: null, shift: [0, 0, 0],
-  style: "ball", scale: 1, bonds: true, tol: 1.15, ionic: false, cell: true, reps: [1, 1, 1], boundary: true, res: "auto",
+  items: new Map(), layers: [], active: null, activeAtoms: null, t: [0, 0, 0],
+  style: "ball", scale: 1, bonds: true, tol: 1.15, cell: true, reps: [1, 1, 1], boundary: true, res: "auto",
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
 };
 let nextItem = 1, nextLayer = 1;
@@ -68,7 +70,19 @@ const fieldLayers = (vis = false) => S.layers.filter(l => l.kind === "field" && 
 const activeField = () => S.layers.find(l => l.id === S.active && l.kind === "field") || null;
 const cellOf = it => (it.structure && it.structure.lattice) || (it.wave && it.wave.lattice) || null;
 const pbcOf = it => (it.structure ? it.structure.pbc : !!it.wave);
-const primaryCell = () => { for (const L of S.layers) { const c = cellOf(itemOf(L)); if (c) return { L: c, pbc: pbcOf(itemOf(L)) }; } return null; };
+/** Cell of the first visible layer that has one (else of any layer): reference for views and for the shift fractions. */
+const primaryCell = () => {
+  for (const vis of [true, false]) for (const L of S.layers) {
+    if (vis && !L.visible) continue;
+    const it = itemOf(L), c = cellOf(it);
+    if (c) return { L: c, pbc: pbcOf(it) };
+  }
+  return null;
+};
+/** The origin shift as fractions of the cell L (the shift itself is the Cartesian translation S.t). */
+// WHY: rounded to 1e-12 so that a typed 0.5 comes back as 0.5 after the Cartesian round trip (exact field rolls)
+const fracShift = L => (L ? cartToFrac(inv3(L), S.t).map(x => Math.round(x * 1e12) / 1e12) : [0, 0, 0]);
+const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.kind === "atoms") || atomLayers()[0] || atomLayers(false)[0] || null;
 
 /* ------------------------------------------------------------------ worker */
 let worker = null, reqId = 0;
@@ -149,11 +163,11 @@ function buildStructure() {
   const atoms = [], bonds = [], segs = [];
   if (S.style !== "off") for (const L of atomLayers()) {
     const st = itemOf(L).structure, reps = st.pbc ? S.reps : [1, 1, 1];
-    const da = displayAtoms(st, { reps, boundary: S.boundary && st.pbc, shift: S.shift });
+    const da = displayAtoms(st, { reps, boundary: S.boundary && st.pbc, shift: fracShift(st.lattice) });
     for (const a of da) { a.layer = L.id; a.r = radiusOf(a.el); a.color = colorOf(a.el); }
     if (S.bonds && S.style !== "space") {
       const br = (S.style === "stick" ? 0.14 : 0.1) * S.scale;
-      for (const [i, j] of bondList(da, { tol: S.tol, skip: S.ionic ? new Set() : IONIC_CATIONS })) {
+      for (const [i, j] of bondList(da, { tol: S.tol, spacers: SPACERS })) {
         const a = da[i], b = da[j];
         bonds.push({ p0: [a.x, a.y, a.z], p1: [b.x, b.y, b.z], c0: a.color, c1: b.color, r: br });
       }
@@ -215,7 +229,7 @@ async function runSurface(L) {
     const budget = p.preview ? 1.5e6 : 8e6, auto = autoStride(f, reps, budget);
     const stride = S.res === "auto" ? auto : Math.max(+S.res, p.preview ? auto : 1);
     const signed = L.mode === "log" && f.kind === "signed" && L.pm && f.stats.min < -1e-6 * f.stats.maxAbs;
-    const { meshes } = await call("mesh", { ds: it.ds, fi: L.fi, reps, stride, isos: signed ? [L.iso, -L.iso] : [L.iso], shift: S.shift, cuts: L.cuts });
+    const { meshes } = await call("mesh", { ds: it.ds, fi: L.fi, reps, stride, isos: signed ? [L.iso, -L.iso] : [L.iso], shift: fracShift(f.span), cuts: L.cuts });
     if (S.layers.includes(L) && L.visible) {
       R.setMeshGroup(L.id, meshes.map((m, i) => ({ ...m, color: hexToRgb01(i ? L.neg : L.pos), opacity: L.opacity })));
       L.mesh = { tris: meshes.reduce((a, m) => a + m.triangles, 0), stride, truncated: meshes.some(m => m.truncated), n: meshes.length };
@@ -308,20 +322,23 @@ function clickAt(x, y) {
   S.region = null;
   uploadAtoms(); updateSelectionBar(); requestRender();
 }
-/** Box selection in CSS pixels: add the atoms whose centres project inside, record the region for cutting. */
-function boxSelect(x0, y0, x1, y1, add) {
-  const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)], [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)];
+/** Region selection: path = [x0, y0, x1, y1, ...] in CSS pixels (a freehand polygon). Adds the atoms whose centres
+ *  project inside it and records the region (polygon in normalised device coordinates, current view) for cutting. */
+function regionSelect(path, add) {
+  if (path.length < 6) return;
   if (!add) S.sel = [];
   const have = new Set(S.sel.map(s => s.i));
   disp.atoms.forEach((a, i) => {
     if (have.has(i)) return;
     const s = cam.project([a.x, a.y, a.z]);
-    if (s && s.x >= ax && s.x <= bx && s.y >= ay && s.y <= by) S.sel.push({ i, layer: a.layer, src: a.src, p: [a.x, a.y, a.z] });
+    if (s && insidePolygon(path, s.x, s.y)) S.sel.push({ i, layer: a.layer, src: a.src, p: [a.x, a.y, a.z] });
   });
   const P = cam.proj("gl"), V = cam.view(), m = new Float64Array(16);
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let v = 0; for (let k = 0; k < 4; k++) v += P[4 * k + r] * V[4 * c + k]; m[4 * c + r] = v; }
-  const nx = x => 2 * x / cam.w - 1, ny = y => 1 - 2 * y / cam.h;
-  S.region = { m: Array.from(m), r: [nx(ax), ny(by), nx(bx), ny(ay)] };
+  const poly = [];
+  for (let k = 0; k < path.length; k += 2) poly.push(2 * path[k] / cam.w - 1, 1 - 2 * path[k + 1] / cam.h);
+  S.region = { m: Array.from(m), poly };
+  $("sec-edit").open = true;
   uploadAtoms(); updateSelectionBar(); requestRender();
 }
 function clearSelection() {
@@ -330,7 +347,7 @@ function clearSelection() {
 }
 function updateSelectionBar() {
   const box = $("measure");
-  if (!S.sel.length && !S.region) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!S.sel.length && !S.region) { box.hidden = true; box.innerHTML = ""; updateEdit(); return; }
   const parts = [];
   if (S.sel.length && S.sel.length <= 4) {
     const m = measureAll(S.sel.map(s => s.p));
@@ -340,24 +357,41 @@ function updateSelectionBar() {
     m.angles.forEach((a, i) => parts.push(`<span class="mk">∠${esc(atomLabel(S.sel[i + 1]))}</span><span class="mv">${a.toFixed(2)}°</span>`));
     if (m.dihedral !== null) parts.push(`<span class="mk">dihedral</span><span class="mv">${m.dihedral.toFixed(2)}°</span>`);
   } else parts.push(`<span class="atoms">${S.sel.length ? `${S.sel.length} atoms selected` : "Region selected"}</span>`);
-  const btn = (id, label, cls = "") => `<button type="button" id="${id}" class="${cls}">${label}</button>`;
-  if (S.sel.length === 1 && primaryCell()) parts.push(btn("act-center", "Center"));
-  if (S.sel.length) parts.push(btn("act-delete", "Delete", "warn"));
-  if (S.region && fieldLayers(true).some(L => L.mesh)) parts.push(btn("act-cut", "Cut surface", "warn"));
   parts.push(`<button type="button" class="x" id="sel-clear" aria-label="Clear the selection">×</button>`);
   box.innerHTML = parts.join("");
   box.hidden = false;
   $("sel-clear").addEventListener("click", clearSelection);
-  if ($("act-center")) $("act-center").addEventListener("click", centerOnSelected);
-  if ($("act-delete")) $("act-delete").addEventListener("click", deleteSelected);
-  if ($("act-cut")) $("act-cut").addEventListener("click", cutSurface);
+  updateEdit();
+}
+/** Edit panel: what is selected, which actions apply to it, the surface cuts and the last undoable change. */
+function updateEdit() {
+  const n = S.sel.length, pc = primaryCell(), s = n > 1 ? "s" : "";
+  const info = $("sel-info");
+  info.classList.toggle("none", !n && !S.region);
+  info.textContent = n ? `${n} atom${s}${n <= 4 ? ": " + S.sel.map(atomLabel).join(" · ") : " selected"}` : S.region ? "A region with no atoms inside" : "Nothing selected";
+  $("sel-clear2").hidden = !n && !S.region;
+  $("sel-hint").hidden = !!(n || S.region);
+  $("e-region").setAttribute("aria-pressed", String(S.boxMode));
+  $("e-delete").disabled = !n;
+  $("e-delete").textContent = n ? `Delete ${n} atom${s}` : "Delete atoms";
+  $("e-cut").hidden = !fieldLayers(true).length; $("e-cut").disabled = !S.region;
+  $("e-center").hidden = !pc; $("e-center").disabled = n !== 1;
+  const cuts = Math.max(0, ...fieldLayers().map(L => L.cuts.length)), cs = cuts > 1 ? "s" : "";
+  $("row-cuts").hidden = !cuts;
+  $("cuts-n").textContent = `${cuts} cut${cs}`;
+  const u = S.undo[S.undo.length - 1];
+  $("e-undo").disabled = !u;
+  $("e-undo-t").textContent = u ? `Undo: ${u.label}` : "Nothing to undo";
+  const shifted = S.t.some(x => Math.abs(x) > 1e-9);
+  $("sum-edit").textContent = [n ? `${n} selected` : S.region ? "region" : "", cuts ? `${cuts} cut${cs}` : "", shifted ? "shifted" : ""].filter(Boolean).join(" · ");
 }
 function drawOverlay() {
   const ov = $("ov");
   let h = "";
-  if (dragBox) {
-    const x = Math.min(dragBox.x0, dragBox.x1), y = Math.min(dragBox.y0, dragBox.y1);
-    h += `<rect class="box" x="${x}" y="${y}" width="${Math.abs(dragBox.x1 - dragBox.x0)}" height="${Math.abs(dragBox.y1 - dragBox.y0)}"/>`;
+  if (dragPath && dragPath.length >= 4) {
+    let d = `M${dragPath[0].toFixed(1)} ${dragPath[1].toFixed(1)}`;
+    for (let k = 2; k < dragPath.length; k += 2) d += `L${dragPath[k].toFixed(1)} ${dragPath[k + 1].toFixed(1)}`;
+    h += `<path class="box" d="${d}Z"/>`;
   }
   if (S.sel.length >= 2 && S.sel.length <= 4) {
     const P = S.sel.map(s => cam.project(s.p));
@@ -389,7 +423,7 @@ function deleteSelected() {
     n += drop.size;
     S.labels = S.labels.map(l => (l.layer !== lid ? l : map[l.src] < 0 ? null : { ...l, src: map[l.src] })).filter(Boolean);
   }
-  pushUndo({ type: "atoms", changes, labels });
+  pushUndo({ type: "atoms", changes, labels, label: `delete ${n} atom${n > 1 ? "s" : ""}` });
   S.sel = []; S.region = null;
   buildStructure();
   toast(`Deleted ${n} atom${n > 1 ? "s" : ""} (in every periodic image).`, false, 6000, { label: "Undo", fn: undo });
@@ -398,55 +432,101 @@ function cutSurface() {
   if (!S.region) return;
   const targets = fieldLayers(true).filter(L => L.mesh);
   for (const L of targets) { L.cuts.push(S.region); requestSurface(L); }
-  pushUndo({ type: "cut", layers: targets.map(L => L.id) });
+  pushUndo({ type: "cut", layers: targets.map(L => L.id), label: "cut the surface" });
   S.sel = []; S.region = null; uploadAtoms(); updateSelectionBar();
   toast("Cut the selected region out of the surface.", false, 6000, { label: "Undo", fn: undo });
 }
 function centerOnSelected() {
   const s = S.sel[0], it = itemOf(layerById(s.layer)), C = cellOf(it) || (primaryCell() || {}).L;
   if (!C) return;
-  const f = cartToFrac(inv3(C), s.p);
-  // shifts are periodic: keep each component in (-0.5, 0.5]
-  setShift(S.shift.map((v, a) => { const x = v + 0.5 - f[a]; return +(x - Math.ceil(x - 0.5)).toFixed(6); }));
+  const mid = [0, 1, 2].map(c => 0.5 * (C[0][c] + C[1][c] + C[2][c]));
+  setShift(wrapShift(S.t.map((v, c) => v + mid[c] - s.p[c])));
 }
-/** Change the origin shift; selections and labels follow their atoms. */
-function setShift(v, record = true) {
-  const old = S.shift.slice();
-  if (v.every((x, a) => Math.abs(x - old[a]) < 1e-12)) return;
-  if (record) pushUndo({ type: "shift", old });
-  S.shift = v.slice();
-  for (const e of [...S.sel, ...S.labels]) {
-    const C = cellOf(itemOf(layerById(e.layer)));
-    if (C) { const d = fracToCart(C, v.map((x, a) => x - old[a])); e.p = e.p.map((x, c) => x + d[c]); }
-  }
-  ["fx", "fy", "fz"].forEach((id, a) => ($(id).value = +S.shift[a].toFixed(4)));
-  buildStructure(); refreshSurfaces(); summaries();
+/** A translation reduced to fractions in (-0.5, 0.5] of the main cell (shifts are periodic). */
+function wrapShift(t) {
+  const pc = primaryCell();
+  if (!pc || !pc.pbc) return t;
+  const f = cartToFrac(inv3(pc.L), t).map(x => { const y = x - Math.ceil(x - 0.5); return Math.abs(y) < 1e-9 ? 0 : +y.toFixed(9); });
+  return fracToCart(pc.L, f);
 }
-function pushUndo(u) { S.undo.push(u); if (S.undo.length > 50) S.undo.shift(); }
+/** Change the origin shift (Cartesian translation t, the same for every layer); selections and labels follow. */
+function setShift(t, record = true) {
+  const old = S.t.slice();
+  if (t.every((x, c) => Math.abs(x - old[c]) < 1e-12)) return;
+  if (record) pushUndo({ type: "shift", old, label: "shift the origin" });
+  S.t = t.slice();
+  for (const e of [...S.sel, ...S.labels]) e.p = e.p.map((x, c) => x + t[c] - old[c]);
+  syncShiftInputs();
+  buildStructure(); refreshSurfaces(); summaries(); updateEdit();
+}
+function syncShiftInputs() { const pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0]; ["fx", "fy", "fz"].forEach((id, a) => ($(id).value = +f[a].toFixed(4))); }
+/** Record an undoable change; u.label names it in the Edit panel ("Undo: delete 3 atoms"). */
+function pushUndo(u) { S.undo.push(u); if (S.undo.length > 50) S.undo.shift(); updateEdit(); }
 function undo() {
   const u = S.undo.pop();
   if (!u) return toast("Nothing to undo.");
   if (u.type === "atoms") { for (const c of u.changes) c.it.structure = c.old; S.labels = u.labels; S.sel = []; buildStructure(); }
   else if (u.type === "cut") for (const id of u.layers) { const L = layerById(id); if (L) { L.cuts.pop(); requestSurface(L); } }
-  else if (u.type === "cuts") { const L = layerById(u.layer); if (L) { L.cuts = u.cuts; requestSurface(L); levelHint(); } }
+  else if (u.type === "cuts") for (const c of u.list) { const L = layerById(c.layer); if (L) { L.cuts = c.cuts; requestSurface(L); } }
   else if (u.type === "shift") setShift(u.old, false);
+  else if (u.type === "derive") {
+    const i = S.layers.findIndex(l => l.id === u.layer);
+    if (i >= 0) S.layers.splice(i, 1);
+    const src = layerById(u.source);
+    if (src) { src.visible = u.wasVisible; S.activeAtoms = src.id; }
+    S.sel = S.sel.filter(e => e.layer !== u.layer); S.labels = S.labels.filter(e => e.layer !== u.layer);
+    buildLayersUI(); updateChrome(); buildStructure(); refit();
+  }
   else if (u.type === "layer") {
     S.layers.splice(Math.min(u.index, S.layers.length), 0, u.layer);
     if (u.layer.kind === "atoms") buildStructure(); else { S.active = u.layer.id; requestSurface(u.layer); syncFieldUI(); buildStructure(); }
     $("empty").hidden = true;
     buildLayersUI(); updateChrome(); refit();
   }
-  toast("Undone.", false, 2500);
+  updateEdit();
+  toast(`Undone: ${u.label}.`, false, 2500);
 }
-function exportPOSCAR() {
-  const L = atomLayers()[0] || atomLayers(false)[0];
+/** Export the active atoms layer as shown (shift, deletions and supercell applied) as POSCAR, CIF or extended XYZ. */
+function exportLayer(fmt) {
+  const L = activeAtomsLayer();
   if (!L) return toast("There are no atoms to export.", true);
-  const it = itemOf(L), txt = toPOSCAR(it.structure, S.shift, `${it.name} (isoview${S.shift.some(Boolean) ? `, shifted by ${S.shift.join(" ")}` : ""})`);
+  const it = itemOf(L), st = it.structure, reps = st.pbc ? S.reps : [1, 1, 1];
+  const sh = shownStructure(st, S.t, reps), pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0];
+  const note = [S.t.some(x => Math.abs(x) > 1e-9) ? `shifted by ${f.map(x => +x.toFixed(4)).join(" ")}` : "", reps.some(r => r > 1) ? `${reps.join("x")} supercell` : ""].filter(Boolean).join(", ");
+  const title = `${it.name} (isoview${note ? ", " + note : ""})`;
+  const txt = fmt === "cif" ? toCIF(sh, title) : fmt === "xyz" ? toXYZ(sh, title) : toPOSCAR(sh, [0, 0, 0], title);
+  const ext = { cif: ".cif", xyz: ".xyz" }[fmt] || ".vasp";
+  download(txt, it.name.split(" + ")[0].replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") + "_isoview" + ext);
+  toast(`Exported ${sh.species.length} atoms as ${fmt === "cif" ? "CIF" : fmt === "xyz" ? "extended XYZ" : "POSCAR"}${note ? " (" + note + ")" : ""}.`, false, 4000);
+}
+function download(text, name) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
-  a.download = it.name.split(" + ")[0].replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") + "_isoview.vasp";
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = name;
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+/** Primitive or conventional cell of the active atoms layer, added as a new layer (the source layer is hidden). */
+function derive(kind) {
+  const L = activeAtomsLayer();
+  if (!L) return toast("Choose a structure layer first.", true);
+  const it = itemOf(L), st = it.structure, tol = Math.max(1e-5, parseFloat($("t-tol").value) || 0.01);
+  if (!st.pbc || !st.lattice) return toast("This needs a periodic structure.", true);
+  let res;
+  try { res = kind === "primitive" ? primitive(st, tol) : conventional(st, tol); }
+  catch (e) { return toast(e.message || String(e), true); }
+  if (kind === "primitive" && res.n === 1) return toast(`Already primitive: no lattice translations within ${tol} Å besides the cell's own.`, false, 6000);
+  const nit = { id: nextItem++, name: `${kind} of ${it.name}`, ds: null, structure: res.structure, wave: null, fields: [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" } };
+  S.items.set(nit.id, nit);
+  const NL = { id: nextLayer++, item: nit.id, kind: "atoms", visible: true };
+  S.layers.splice(S.layers.indexOf(L) + 1, 0, NL);
+  const wasVisible = L.visible;
+  L.visible = false; S.activeAtoms = NL.id;
+  pushUndo({ type: "derive", layer: NL.id, source: L.id, wasVisible, label: `${kind} cell` });
+  S.atlas = buildAtlas(atlasSpecies());
+  buildLayersUI(); updateChrome(); buildStructure(); refit(); syncShiftInputs();
+  const what = kind === "primitive" ? `primitive cell (${res.structure.species.length} atoms, ${res.n} lattice points in the original)` : `conventional ${res.system} cell (${res.structure.species.length} atoms, ${res.z}× the primitive)`;
+  toast(`Added the ${what} as a new layer; the original is hidden.`, false, 7000, { label: "Undo", fn: undo });
 }
 
 /* ------------------------------------------------------------------ label mode */
@@ -460,8 +540,8 @@ function setLabelMode(on) {
 function setBoxMode(on) {
   S.boxMode = on;
   if (on && S.labelMode) setLabelMode(false);
-  $("btn-box").setAttribute("aria-pressed", String(on));
   $("stage").classList.toggle("boxing", on);
+  updateEdit();
 }
 function labelBar() {
   $("labelbar").hidden = !S.labelMode;
@@ -470,7 +550,7 @@ function labelBar() {
 
 /* ------------------------------------------------------------------ pointer */
 const stage = $("stage"), ptrs = new Map();
-let drag = null, dragBox = null;
+let drag = null, dragPath = null;
 stage.addEventListener("pointerdown", e => {
   if (!R || !S.layers.length) return;
   if (stage.setPointerCapture) stage.setPointerCapture(e.pointerId);
@@ -478,7 +558,7 @@ stage.addEventListener("pointerdown", e => {
   if (ptrs.size === 1) {
     const box = e.button === 0 && (e.shiftKey || S.boxMode) && !S.labelMode;
     drag = { x0: e.clientX, y0: e.clientY, moved: false, box, add: e.shiftKey && S.sel.length > 0, pan: !box && (e.button !== 0 || e.ctrlKey || e.metaKey), button: e.button };
-  } else if (drag) { drag.moved = true; drag.box = false; dragBox = null; }
+  } else if (drag) { drag.moved = true; drag.box = false; dragPath = null; }
 });
 stage.addEventListener("pointermove", e => {
   const prev = ptrs.get(e.pointerId);
@@ -492,7 +572,11 @@ stage.addEventListener("pointermove", e => {
   } else {
     if (!drag.moved && Math.hypot(cur.x - drag.x0, cur.y - drag.y0) > 4) drag.moved = true;
     if (drag.moved) {
-      if (drag.box) dragBox = { x0: drag.x0, y0: drag.y0, x1: cur.x, y1: cur.y };
+      if (drag.box) {
+        if (!dragPath) dragPath = [drag.x0, drag.y0];
+        const n = dragPath.length;
+        if (Math.hypot(cur.x - dragPath[n - 2], cur.y - dragPath[n - 1]) > 3) dragPath.push(cur.x, cur.y);
+      }
       else if (drag.pan) cam.panBy(cur.x - prev.x, cur.y - prev.y);
       else cam.rotateBy(cur.x - prev.x, cur.y - prev.y);
     }
@@ -504,10 +588,10 @@ const endPtr = e => {
   if (!ptrs.has(e.pointerId)) return;
   ptrs.delete(e.pointerId);
   if (drag && e.type === "pointerup" && ptrs.size === 0) {
-    if (drag.box && drag.moved && dragBox) boxSelect(dragBox.x0, dragBox.y0, dragBox.x1, dragBox.y1, drag.add);
+    if (drag.box && drag.moved && dragPath) regionSelect(dragPath, drag.add);
     else if (!drag.moved && drag.button === 0) clickAt(e.clientX, e.clientY);
   }
-  if (ptrs.size === 0) { drag = null; if (dragBox) { dragBox = null; requestRender(); } }
+  if (ptrs.size === 0) { drag = null; if (dragPath) { dragPath = null; requestRender(); } }
 };
 stage.addEventListener("pointerup", endPtr);
 stage.addEventListener("pointercancel", endPtr);
@@ -558,8 +642,6 @@ function levelHint() {
   const m = L.mesh, ord = n => n + (["th", "st", "nd", "rd"][n] || "th");
   const tri = m ? ` · ${m.tris >= 1e6 ? (m.tris / 1e6).toFixed(2) + "M" : Math.round(m.tris / 1e3) + "k"} triangles${m.stride > 1 ? ` (every ${ord(m.stride)} point)` : ""}${m.truncated ? ", truncated" : ""}` : "";
   $("stats").textContent = `${f.n.join(" × ")} grid · min ${fmt(st.min)} · max ${fmt(st.max)} · ∫ ${fi}${f.unit === "e/Å³" ? " e" : ""}${tri}`;
-  $("row-cuts").hidden = !L.cuts.length;
-  $("cuts-n").textContent = `${L.cuts.length} cut${L.cuts.length > 1 ? "s" : ""}`;
 }
 function setLevelFromSlider(preview) {
   const L = activeField(), f = activeStats();
@@ -616,18 +698,28 @@ const activeWave = () => { const L = activeField(); const it = L && itemOf(L); r
 
 /* ------------------------------------------------------------------ layers panel */
 function buildLayersUI() {
-  const box = $("layers");
+  const box = $("layers"), aa = activeAtomsLayer();
   box.innerHTML = S.layers.map(L => {
     const it = itemOf(L), f = L.kind === "field" ? it.fields[L.fi] : null;
     const kind = L.kind === "atoms" ? `${it.structure.species.length} atoms` : f ? f.name : it.wave ? "orbital" : "field";
     const signed = f && f.kind === "signed";
     const sw = L.kind === "field" ? `<input type="color" class="cpos" value="${L.pos}" aria-label="Surface colour">${signed ? `<input type="color" class="cneg" value="${L.neg}" aria-label="Negative surface colour">` : ""}` : "";
-    return `<div class="layer${L.id === S.active ? " active" : ""}${L.visible ? "" : " off"}" data-id="${L.id}">` +
+    const act = L.id === S.active || (L.kind === "atoms" && aa && L.id === aa.id);
+    return `<div class="layer${act ? " active" : ""}${L.visible ? "" : " off"}" data-id="${L.id}">` +
       `<button type="button" class="eye" aria-pressed="${L.visible}" aria-label="Show or hide this layer"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/></svg></button>` +
       `<span class="lname" title="${esc(it.name)}"><span class="lk">${esc(kind)}</span>${esc(it.name)}</span>${sw}` +
       `<button type="button" class="rm" aria-label="Remove this layer">×</button></div>`;
   }).join("");
   $("sum-layers").textContent = `${S.layers.length} layer${S.layers.length === 1 ? "" : "s"}`;
+  updateTools();
+}
+/** Structure tools act on the active atoms layer (click an atoms row to choose it). */
+function updateTools() {
+  const L = activeAtomsLayer(), st = L && itemOf(L).structure;
+  $("tools").hidden = !L;
+  if (!L) return;
+  $("tools-for").textContent = `${itemOf(L).name} · ${st.species.length} atoms`;
+  $("t-prim").disabled = $("t-conv").disabled = !(st.pbc && st.lattice);
 }
 $("layers").addEventListener("click", e => {
   const row = e.target.closest(".layer");
@@ -640,6 +732,7 @@ $("layers").addEventListener("click", e => {
     buildStructure(); buildLayersUI(); refit();
   } else if (e.target.closest(".rm")) removeLayer(L);
   else if (L.kind === "field" && !e.target.closest("input")) { S.active = L.id; buildLayersUI(); syncFieldUI(); $("sec-surface").open = true; }
+  else if (L.kind === "atoms") { S.activeAtoms = L.id; buildLayersUI(); }
 });
 $("layers").addEventListener("input", e => {
   const row = e.target.closest(".layer"), L = row && layerById(+row.dataset.id);
@@ -651,7 +744,7 @@ $("layers").addEventListener("input", e => {
 function removeLayer(L) {
   const index = S.layers.indexOf(L);
   S.layers.splice(index, 1);
-  pushUndo({ type: "layer", layer: L, index });
+  pushUndo({ type: "layer", layer: L, index, label: "remove the layer" });
   if (L.kind === "field") { R.removeMeshGroup(L.id); L.mesh = null; if (S.active === L.id) S.active = (fieldLayers()[0] || {}).id ?? null; syncFieldUI(); }
   S.sel = S.sel.filter(s => s.layer !== L.id); S.labels = S.labels.filter(s => s.layer !== L.id);
   // if only hidden layers are left (e.g. a duplicate atoms layer), show them rather than an empty view
@@ -682,9 +775,9 @@ async function openFiles(list, mode = "auto") {
   finally { busy(false); }
 }
 function clearScene() {
-  for (const it of S.items.values()) call("drop", { ds: it.ds }).catch(() => {});
-  S.items.clear(); S.layers = []; S.active = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
-  S.shift = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
+  for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
+  S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
+  S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
   if (R) R.clearMeshes();
   setLabelMode(false); setBoxMode(false);
@@ -723,9 +816,10 @@ async function addItem(d, adding) {
   $("empty").hidden = true;
   buildLayersUI(); updateChrome(); buildStructure();
   if (!adding) resetView(); else refit();
-  for (const id of ["sec-layers", "sec-structure", "sec-surface", "sec-orbital", "sec-view"]) $(id).open = false;
-  if (adding) $("sec-layers").open = true;
-  syncFieldUI();
+  for (const id of ["sec-structure", "sec-surface", "sec-orbital", "sec-view"]) $(id).open = false;
+  if (!adding) $("sec-edit").open = false;
+  $("sec-layers").open = true;
+  syncFieldUI(); syncShiftInputs();
   if (FL && it.wave) { if (!adding) $("sec-orbital").open = true; await showBand(FL, Math.max(0, it.wave.frontier[0][0].homo)); }
   else if (FL) { if (!adding) $("sec-surface").open = true; requestSurface(FL); }
   if (notes.length) toast(notes.join("; "), false, 7000);
@@ -735,6 +829,7 @@ async function addItem(d, adding) {
 function updateChrome() {
   const has = S.layers.length > 0;
   $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has;
+  for (const b of document.querySelectorAll(".corner-eye")) b.hidden = !has;
   const pc = primaryCell();
   for (const el of document.querySelectorAll(".pbc")) el.hidden = !(pc && pc.pbc);
   for (const b of document.querySelectorAll("[data-along]")) b.hidden = !pc;
@@ -742,7 +837,7 @@ function updateChrome() {
   $("doc-name").textContent = names.join(" + ");
   const al = atomLayers();
   $("doc-sub").textContent = al.length === 1 ? formula(itemOf(al[0]).structure.species) : al.length > 1 ? `${al.length} structures` : "";
-  $("row-export").hidden = !atomLayers(false).length;
+  updateTools(); updateEdit();
   updateInfo(); summaries(); segState();
 }
 function updateInfo() {
@@ -752,7 +847,7 @@ function updateInfo() {
     const p = params(pc.L);
     info += `${info ? " · " : ""}${p.slice(0, 3).map(x => x.toFixed(3)).join(" ")} Å · ${p.slice(3).map(x => x.toFixed(2)).join(" ")}° · ${Math.abs(det3(pc.L)).toFixed(1)} Å³`;
   }
-  if (S.shift.some(Boolean)) info += ` · shifted by ${S.shift.map(x => +x.toFixed(4)).join(" ")}`;
+  if (pc && S.t.some(x => Math.abs(x) > 1e-9)) info += ` · shifted by ${fracShift(pc.L).map(x => +x.toFixed(4)).join(" ")}`;
   $("info").textContent = info;
 }
 function summaries() {
@@ -806,6 +901,26 @@ function snapshot() {
 }
 function restyle() { if (!R) return; readPalette(); R.setBackground(pal.bg); requestRender(); }
 
+/* ------------------------------------------------------------------ corner eyes: tuck away the group in each corner */
+const CORNERS = { tl: "tl", tr: "dock", bl: "bl", br: "br" };
+const CORNER_NAMES = { tl: "the title", tr: "the panel", bl: "the axes and cell", br: "the view buttons" };
+const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="open"><g class="lid"><path d="M2.8 12s3.4-6 9.2-6 9.2 6 9.2 6-3.4 6-9.2 6-9.2-6-9.2-6z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></g></g>' +
+  '<g class="shut" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.4 10.6c2.4 2.9 5.3 4.4 8.6 4.4s6.2-1.5 8.6-4.4"/><path d="m6.3 13.4-1.4 1.9M12 15v2.3M17.7 13.4l1.4 1.9"/></g></svg>';
+function tuck(c, on) {
+  $(CORNERS[c]).classList.toggle("tucked", on);
+  const b = document.querySelector(`.corner-eye[data-corner="${c}"]`), t = `${on ? "Show" : "Hide"} ${CORNER_NAMES[c]} (H for all)`;
+  b.setAttribute("aria-pressed", String(on)); b.title = t; b.setAttribute("aria-label", t);
+}
+/** H: hide every corner if any is shown, otherwise show them all. */
+function tuckAll() { const any = Object.values(CORNERS).some(id => !$(id).classList.contains("tucked")); for (const c in CORNERS) tuck(c, any); }
+for (const c in CORNERS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "corner-eye"; b.dataset.corner = c; b.hidden = true; b.innerHTML = EYE;
+  b.addEventListener("click", () => tuck(c, !$(CORNERS[c]).classList.contains("tucked")));
+  document.body.append(b);
+  tuck(c, false);
+}
+
 /* ------------------------------------------------------------------ wiring */
 function bindSeg(key, fn) {
   document.querySelector(`.seg[data-key="${key}"]`).addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
@@ -833,9 +948,8 @@ $("bands").addEventListener("keydown", e => {
   const el = $("bands").querySelector(`[data-b="${b}"]`); if (el) el.scrollIntoView({ block: "nearest" });
 });
 $("scale").addEventListener("input", e => { S.scale = +e.target.value; buildStructure(); });
-$("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = $("row-ionic").hidden = !S.bonds; buildStructure(); });
+$("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = !S.bonds; buildStructure(); });
 $("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").textContent = S.tol.toFixed(2); buildStructure(); });
-$("ionic").addEventListener("change", e => { S.ionic = e.target.checked; buildStructure(); });
 $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStructure(); });
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
@@ -843,12 +957,14 @@ for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("chan
   buildStructure(); fit(); refreshSurfaces(); summaries();
 });
 for (const [i, id] of ["fx", "fy", "fz"].entries()) $(id).addEventListener("change", e => {
-  const v = parseFloat(e.target.value);
-  if (!Number.isFinite(v)) { e.target.value = S.shift[i]; return; }
-  const s = S.shift.slice(); s[i] = v; setShift(s);
+  const pc = primaryCell(), v = parseFloat(e.target.value);
+  if (!pc || !Number.isFinite(v)) { syncShiftInputs(); return; }
+  const f = fracShift(pc.L); f[i] = v; setShift(fracToCart(pc.L, f));
 });
 $("shift-reset").addEventListener("click", () => setShift([0, 0, 0]));
-$("btn-export").addEventListener("click", exportPOSCAR);
+$("t-prim").addEventListener("click", () => derive("primitive"));
+$("t-conv").addEventListener("click", () => derive("conventional"));
+for (const b of document.querySelectorAll("[data-fmt]")) b.addEventListener("click", () => exportLayer(b.dataset.fmt));
 $("field").addEventListener("change", e => { const L = activeField(); if (!L) return; L.fi = +e.target.value; initLevel(L, true); syncFieldUI(); buildLayersUI(); requestSurface(L); });
 $("surf").addEventListener("change", e => { const L = activeField(); if (!L) return; L.visible = e.target.checked; requestSurface(L); buildLayersUI(); summaries(); });
 $("pm").addEventListener("change", e => { const L = activeField(); if (!L) return; L.pm = e.target.checked; requestSurface(L); });
@@ -864,13 +980,24 @@ $("iso-num").addEventListener("change", e => {
   if (L.mode === "log") L.p = fractionAbove(f.stats, L.iso);
   syncFieldUI(); requestSurface(L);
 });
-$("cuts-clear").addEventListener("click", () => { const L = activeField(); if (!L || !L.cuts.length) return; pushUndo({ type: "cuts", layer: L.id, cuts: L.cuts }); L.cuts = []; requestSurface(L); levelHint(); });
+$("cuts-clear").addEventListener("click", () => {
+  const cut = fieldLayers().filter(L => L.cuts.length);
+  if (!cut.length) return;
+  const list = cut.map(L => ({ layer: L.id, cuts: L.cuts }));
+  for (const L of cut) { L.cuts = []; requestSurface(L); }
+  pushUndo({ type: "cuts", list, label: "restore the surface" });
+});
 for (const b of document.querySelectorAll("[data-along]")) b.addEventListener("click", () => viewAlong(+b.dataset.along));
 $("btn-reset").addEventListener("click", resetView);
 $("btn-snap").addEventListener("click", snapshot);
 $("btn-home").addEventListener("click", showHome);
 $("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
-$("btn-box").addEventListener("click", () => setBoxMode(!S.boxMode));
+$("e-region").addEventListener("click", () => setBoxMode(!S.boxMode));
+$("e-delete").addEventListener("click", deleteSelected);
+$("e-cut").addEventListener("click", cutSurface);
+$("e-center").addEventListener("click", centerOnSelected);
+$("e-undo").addEventListener("click", undo);
+$("sel-clear2").addEventListener("click", clearSelection);
 $("label-done").addEventListener("click", () => setLabelMode(false));
 $("label-clear").addEventListener("click", () => { S.labels = []; uploadLabels(); requestRender(); });
 $("btn-back").addEventListener("click", () => { $("empty").hidden = true; });
@@ -919,6 +1046,7 @@ window.addEventListener("keydown", e => {
   else if (k === "r") resetView();
   else if (k === "s") snapshot();
   else if (k === "l") setLabelMode(!S.labelMode);
+  else if (k === "h") tuckAll();
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }

@@ -54,5 +54,8 @@ export function colorOf(sym) {
   return "#" + c.map((v, i) => Math.round(0.8 * v + 0.2 * g[i]).toString(16).padStart(2, "0")).join("");
 }
 
-/** Group 1 and the heavier group 2 elements, which are drawn without bonds by default (A-site cations). */
-export const IONIC_CATIONS = new Set(["Li", "Na", "K", "Rb", "Cs", "Fr", "Ca", "Sr", "Ba", "Ra"]);
+/**
+ * Group 1 and the heavier group 2 elements (A-site and interlayer cations). They sit in cages of a framework, and bonds
+ * to them hide it, so structure.js bondList drops their bonds whenever the other atoms are bonded among themselves.
+ */
+export const SPACERS = new Set(["Li", "Na", "K", "Rb", "Cs", "Fr", "Ca", "Sr", "Ba", "Ra"]);

@@ -13,9 +13,11 @@
  * Origin shift by fractions (f_x, f_y, f_z) of the cell: periodic grids roll by k_a = floor(f_a n_a) points and move the
  * origin by the remainder (f_a n_a - k_a) grid steps, so the field moves exactly with the atoms (no interpolation);
  * other grids move their origin by sum_a f_a span_a.
- * Cuts: a grid point p is set to NaN (no surface, gfx/mc.js skips the cell) when, for any cut { m, r }, the clip
- * position c = m (p, 1) has c_w > 0 and c_xy / c_w inside the rectangle r = [x0, y0, x1, y1] (normalised device
- * coordinates of the view that made the cut, m = proj view in the WebGL convention).
+ * Cuts: a grid point p is set to NaN (no surface, gfx/mc.js skips the cell) when, for any cut { m, poly } (or the
+ * rectangle { m, r }), the clip position c = m (p, 1) has c_w > 0 and c_xy / c_w inside the polygon poly = [x0, y0,
+ * x1, y1, ...] (normalised device coordinates of the view that made the cut, m = proj view in the WebGL convention).
+ * The polygon is rasterised once on a 384 x 384 grid over its bounding box (even-odd rule), so each point costs one
+ * lookup.
  * Output order: x index fastest (I + mx (J + my K)), as read by the marching cubes (gfx/mc.js).
  */
 import { det3 } from "./lattice.js";
@@ -96,18 +98,37 @@ export function renderGrid(f, reps = [1, 1, 1], s = 1, shift = [0, 0, 0], cuts =
   return { data: out, size: m, vox, origin };
 }
 
+/** Even-odd point-in-polygon test; P = [x0, y0, x1, y1, ...]. */
+export function insidePolygon(P, x, y) {
+  let inside = false;
+  for (let i = 0, j = P.length - 2; i < P.length; j = i, i += 2) {
+    const xi = P[i], yi = P[i + 1], xj = P[j], yj = P[j + 1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+/** A cut as { M, inside(X, Y) } in normalised device coordinates. */
+function prepCut(c) {
+  if (!c.poly) return { M: c.m, inside: (X, Y) => X >= c.r[0] && X <= c.r[2] && Y >= c.r[1] && Y <= c.r[3] };
+  const P = c.poly, R = 384;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < P.length; i += 2) { x0 = Math.min(x0, P[i]); x1 = Math.max(x1, P[i]); y0 = Math.min(y0, P[i + 1]); y1 = Math.max(y1, P[i + 1]); }
+  const gx = (x1 - x0) / R || 1, gy = (y1 - y0) / R || 1, ras = new Uint8Array(R * R);
+  for (let iy = 0; iy < R; iy++) for (let ix = 0; ix < R; ix++) ras[iy * R + ix] = insidePolygon(P, x0 + (ix + 0.5) * gx, y0 + (iy + 0.5) * gy) ? 1 : 0;
+  return { M: c.m, inside: (X, Y) => X >= x0 && X <= x1 && Y >= y0 && Y <= y1 && ras[Math.min(R - 1, Math.floor((Y - y0) / gy)) * R + Math.min(R - 1, Math.floor((X - x0) / gx))] === 1 };
+}
 /** Set grid points inside any cut region to NaN (see the file docstring). */
-function maskCuts(out, m, vox, o, cuts) {
+function maskCuts(out, m, vox, o, cutList) {
+  const cuts = cutList.map(prepCut);
   let p = 0;
   for (let K = 0; K < m[2]; K++) for (let J = 0; J < m[1]; J++) {
     const b = [0, 1, 2].map(c => o[c] + J * vox[1][c] + K * vox[2][c]);
     for (let I = 0; I < m[0]; I++, p++) {
       const x = b[0] + I * vox[0][0], y = b[1] + I * vox[0][1], z = b[2] + I * vox[0][2];
-      for (const { m: M, r } of cuts) {
+      for (const { M, inside } of cuts) {
         const w = M[3] * x + M[7] * y + M[11] * z + M[15];
         if (w <= 0) continue;
-        const X = (M[0] * x + M[4] * y + M[8] * z + M[12]) / w, Y = (M[1] * x + M[5] * y + M[9] * z + M[13]) / w;
-        if (X >= r[0] && X <= r[2] && Y >= r[1] && Y <= r[3]) { out[p] = NaN; break; }
+        if (inside((M[0] * x + M[4] * y + M[8] * z + M[12]) / w, (M[1] * x + M[5] * y + M[9] * z + M[13]) / w)) { out[p] = NaN; break; }
       }
     }
   }
