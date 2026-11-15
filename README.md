@@ -27,6 +27,10 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 - **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
   or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
+  **Show elements** has a checkbox for each element, with its atom count. Untick one to hide those atoms and their
+  bonds: the bonds are still found among all atoms, so hiding Cl does not bond the cations it kept apart. Hiding
+  only changes the view; Export as shown leaves hidden elements out and says so. Opening a new file shows every
+  element again.
 - **Surface**: coarse grids are drawn on a finer grid so surfaces are smooth (a step of at most 0.1 Å, up to 4 M
   points): periodic data by Fourier interpolation, which is exact for plane-wave densities and potentials and keeps
   the integral; other grids (cube) by cubic interpolation. WAVECAR orbitals are built on a larger FFT box, which is

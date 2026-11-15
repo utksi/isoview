@@ -25,17 +25,17 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=18";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=18";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=18";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=18";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=18";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=18";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=18";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=18";
-import { measureAll } from "./measure.js?v=18";
-import { GifWriter, buildPalette } from "./gif.js?v=18";
-import * as store from "./store.js?v=18";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=19";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=19";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=19";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=19";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=19";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=19";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=19";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=19";
+import { measureAll } from "./measure.js?v=19";
+import { GifWriter, buildPalette } from "./gif.js?v=19";
+import * as store from "./store.js?v=19";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -54,6 +54,7 @@ const S = {
   style: "ball", scale: 1, bonds: true, tol: 1.15, cell: true, reps: [1, 1, 1], boundary: true, res: "auto",
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
   frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "classic",
+  hide: new Set(), // elements not drawn (Structure panel checkboxes); a view setting, the structure keeps them
 };
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
@@ -111,7 +112,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=18", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=19", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -192,13 +193,17 @@ function buildStructure() {
     for (const a of da) { a.layer = L.id; a.r = radiusOf(a.el); a.color = colorOf(a.el); }
     if (S.bonds && S.style !== "space") {
       const br = (S.style === "stick" ? 0.14 : 0.1) * S.scale;
+      // WHY: bonds are found among all atoms, then those to hidden elements dropped, so hiding (say) Cl does not
+      // bond the cations it separated
       for (const [i, j] of bondList(da, { tol: S.tol, spacers: SPACERS })) {
         const a = da[i], b = da[j];
+        if (S.hide.has(a.el) || S.hide.has(b.el)) continue;
         bonds.push({ p0: [a.x, a.y, a.z], p1: [b.x, b.y, b.z], c0: a.color, c1: b.color, r: br });
       }
     }
-    atoms.push(...da);
+    atoms.push(...(S.hide.size ? da.filter(a => !S.hide.has(a.el)) : da));
   }
+  speciesUI();
   if (S.cell) {
     const cells = [];
     for (const L of S.layers) {
@@ -225,6 +230,18 @@ function buildStructure() {
   R.setLines(packLines(segs), segs.length);
   updateSelectionBar(); updateInfo(); updateSymmetry();
   requestRender();
+}
+/** One checkbox per element of the atoms layers on show (with its colour and atom count); unticked = not drawn. */
+function speciesUI() {
+  const count = new Map();
+  for (const L of atomLayers()) for (const el of itemOf(L).structure.species) count.set(el, (count.get(el) || 0) + 1);
+  const els = [...count.keys()].sort((a, b) => SYMBOLS.indexOf(a) - SYMBOLS.indexOf(b)), box = $("species");
+  $("row-species").hidden = els.length === 0;
+  const key = els.map(e => `${e}${count.get(e)}${S.hide.has(e) ? "-" : ""}`).join();
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.innerHTML = els.map(e => `<label class="sp" title="${S.hide.has(e) ? "Show" : "Hide"} the ${esc(e)} atoms"><input type="checkbox" data-el="${esc(e)}"${S.hide.has(e) ? "" : " checked"}>` +
+    `<span class="dot" style="background:${colorOf(e)}"></span>${esc(e)}<em>${count.get(e)}</em></label>`).join("");
 }
 function uploadAtoms() {
   const sel = new Set(S.sel.map(s => s.i));
@@ -534,8 +551,14 @@ function exportLayer(fmt) {
   const L = activeAtomsLayer();
   if (!L) return toast("There are no atoms to export.", true);
   const it = itemOf(L), st = it.structure, reps = st.pbc ? S.reps : [1, 1, 1];
-  const sh = shownStructure(st, S.t, reps), pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0];
-  const note = [S.t.some(x => Math.abs(x) > 1e-9) ? `shifted by ${f.map(x => +x.toFixed(4)).join(" ")}` : "", reps.some(r => r > 1) ? `${reps.join("x")} supercell` : ""].filter(Boolean).join(", ");
+  let sh = shownStructure(st, S.t, reps);
+  const pc = primaryCell(), f = pc ? fracShift(pc.L) : [0, 0, 0], gone = sh.species.filter(e => S.hide.has(e));
+  if (gone.length) {
+    const keep = sh.species.map((e, i) => (S.hide.has(e) ? -1 : i)).filter(i => i >= 0);
+    sh = { ...sh, ids: undefined, species: keep.map(i => sh.species[i]), pos: Float64Array.from(keep.flatMap(i => [sh.pos[3 * i], sh.pos[3 * i + 1], sh.pos[3 * i + 2]])) };
+  }
+  const note = [S.t.some(x => Math.abs(x) > 1e-9) ? `shifted by ${f.map(x => +x.toFixed(4)).join(" ")}` : "", reps.some(r => r > 1) ? `${reps.join("x")} supercell` : "",
+    gone.length ? `without ${[...new Set(gone)].join(", ")}` : ""].filter(Boolean).join(", ");
   const title = `${it.name}${it.traj ? ` frame ${frameOf(it) + 1}` : ""} (isoview${note ? ", " + note : ""})`;
   const txt = fmt === "cif" ? toCIF(sh, title) : fmt === "xyz" ? toXYZ(sh, title) : toPOSCAR(sh, [0, 0, 0], title);
   const ext = { cif: ".cif", xyz: ".xyz" }[fmt] || ".vasp";
@@ -1102,7 +1125,7 @@ async function openFiles(list, mode = "auto") {
 function clearScene() {
   for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
   S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
-  S.frame = 0; S.playing = false;
+  S.frame = 0; S.playing = false; S.hide = new Set();
   S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
   // a new scene starts from the default bond reach unless "keep" (next to it) is on
@@ -1189,7 +1212,7 @@ function serialize(withFiles = false) {
       ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
     layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts, auto: !!L.auto, w: L.w } : {}) })),
     view: { style: S.style, look: S.look, scale: S.scale, bonds: S.bonds, tol: S.tol, cell: S.cell, reps: S.reps.slice(), boundary: S.boundary, res: S.res, proj: S.proj, t: S.t.slice(),
-      frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
+      frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, hide: [...S.hide], active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
       labels: S.labels.map(l => ({ layer: S.layers.findIndex(L => L.id === l.layer), src: l.src, p: l.p })) },
     cam: { q: cam.q.slice(), dist: cam.dist, radius: cam.radius, target: cam.target.slice() },
   };
@@ -1214,7 +1237,7 @@ async function restoreScene(st, files, stored = true) {
     if (!(await ensureRenderer())) return false;
     clearScene();
     Object.assign(S, { style: st.view.style, look: LOOKS[st.view.look] ? st.view.look : "classic", scale: st.view.scale, bonds: st.view.bonds, tol: st.view.tol, cell: st.view.cell, reps: st.view.reps.slice(), boundary: st.view.boundary,
-      res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop" });
+      res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop", hide: new Set(st.view.hide || []) });
     syncControls();
     for (const sp of st.items) {
       let d = null;
@@ -1314,7 +1337,7 @@ function updateInfo() {
 }
 function summaries() {
   const pc = primaryCell();
-  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== "classic" ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}`;
+  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== "classic" ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}${S.hide.size ? ` · no ${[...S.hide].join(", ")}` : ""}`;
   const L = activeField(), f = activeStats();
   $("sum-surface").textContent = !L || !f ? "" : !L.visible ? "hidden" : L.mode === "log" ? `${fmt(L.iso)} · ${Math.round(100 * fractionAbove(f.stats, L.iso))}%` : fmt(L.iso);
   const aw = activeWave();
@@ -1430,6 +1453,7 @@ const OPTIONS = [
   { t: "Resolution", sel: '.seg[data-key="res"]', k: "resolution quality grid stride smooth coarse" },
   { t: "Band", sel: "#bands", k: "band orbital wavefunction homo lumo state eigenvalue" },
   { t: "Spin", sel: '.seg[data-key="wspin"]', k: "spin up down channel" },
+  { t: "Show elements", sel: "#species", k: "hide atoms element species checkbox show only remove view cations anions tick untick" },
   { t: "Add a band as a layer", sel: "#add-band", self: true, k: "several bands orbitals both spins up down hole electron overlay together simultaneously at once another wavefunction" },
   { t: "k-point", sel: "#kpt", k: "k-point kpoint kpt" },
   { t: "|ψ|² or ψ", sel: '.seg[data-key="wmode"]', k: "psi wavefunction phase sign density" },
@@ -1462,7 +1486,7 @@ const OPTIONS = [
 ];
 const WHY = { "sec-surface": "needs a volumetric file", "sec-orbital": "needs a WAVECAR", "sec-traj": "needs a trajectory", player: "needs a trajectory",
   dock: "open a file first", br: "open a file first", bl: "open a file first", "doc-sg": "needs a periodic structure", "btn-new": "open a file first", "e-cut": "needs a surface",
-  "row-cuts": "after a cut", "row-tol": "with bonds on", "row-field": "with several fields", "row-addfield": "with several fields", "row-pm": "for signed fields", "mfmt-video": "this browser cannot record video",
+  "row-cuts": "after a cut", "row-tol": "with bonds on", "row-field": "with several fields", "row-addfield": "with several fields", "row-species": "needs atoms", "row-pm": "for signed fields", "mfmt-video": "this browser cannot record video",
   "row-spin": "for spin-polarised WAVECARs", "row-k": "with several k-points", "row-wmode": "for Γ-only WAVECARs", "row-half": "for Γ-only WAVECARs", "tr-spark": "when the file has energies" };
 /** Why a control is not available now ("" when it is). */
 function whyNot(el) {
@@ -1590,6 +1614,12 @@ $("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").
 $("tol-keep").addEventListener("change", e => { try { localStorage.setItem("isoview-keep-reach", e.target.checked ? "1" : "0"); } catch (err) { /* storage unavailable */ } });
 try { $("tol-keep").checked = localStorage.getItem("isoview-keep-reach") === "1"; } catch (e) { /* storage unavailable */ }
 $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStructure(); });
+$("species").addEventListener("change", e => {
+  const el = e.target.dataset.el;
+  if (!el) return;
+  if (e.target.checked) S.hide.delete(el); else S.hide.add(el);
+  buildStructure(); summaries();
+});
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
   S.reps[i] = Math.min(6, Math.max(1, Math.round(+e.target.value) || 1)); e.target.value = S.reps[i];
