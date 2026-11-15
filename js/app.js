@@ -25,23 +25,29 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=17";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=17";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=17";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=17";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=17";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=17";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=17";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=17";
-import { measureAll } from "./measure.js?v=17";
-import { GifWriter, buildPalette } from "./gif.js?v=17";
-import * as store from "./store.js?v=17";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=18";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=18";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=18";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=18";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=18";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=18";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=18";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=18";
+import { measureAll } from "./measure.js?v=18";
+import { GifWriter, buildPalette } from "./gif.js?v=18";
+import * as store from "./store.js?v=18";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const qp = new URLSearchParams(location.search);
 // colour pairs (positive, negative) for successive field layers: mid-tones readable on light and dark backgrounds
 const FIELD_COLORS = [["#e3a03a", "#3b86d6"], ["#2bb3a3", "#e0607e"], ["#9b7be0", "#7cb342"], ["#ef7d4b", "#5c9bd6"]];
+// spin channels (a band of a spin-polarised WAVECAR, a CHGCAR's spin up / spin down): up warm, down cool;
+// a magnetization field shows spin-up excess warm and spin-down excess blue
+const SPIN_COLORS = [
+  [["#e3a03a", "#d6456a"], ["#ef7d4b", "#b8558f"], ["#d9b23a", "#c0392b"]],
+  [["#3b86d6", "#2bb3a3"], ["#6f7fe0", "#3fb6d8"], ["#2f6db3", "#5aa36a"]],
+];
 
 const S = {
   items: new Map(), layers: [], active: null, activeAtoms: null, t: [0, 0, 0],
@@ -105,7 +111,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=17", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=18", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -554,7 +560,7 @@ function derive(kind) {
   catch (e) { return toast(e.message || String(e), true); }
   if (kind === "primitive" && res.n === 1) return toast(`Already primitive: no lattice translations within ${tol} Å besides the cell's own.`, false, 6000);
   if (kind === "conventional" && sameCellShape(st, res.structure, tol)) return toast(`Already the conventional ${res.system} cell (${st.species.length} atoms).`, false, 6000);
-  const nit = { id: nextItem++, name: `${kind} of ${it.name}${it.traj ? ` (frame ${frameOf(it) + 1})` : ""}`, ds: null, structure: res.structure, wave: null, fields: [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" } };
+  const nit = { id: nextItem++, name: `${kind} of ${it.name}${it.traj ? ` (frame ${frameOf(it) + 1})` : ""}`, ds: null, structure: res.structure, wave: null, fields: [], nextSlot: 0 };
   S.items.set(nit.id, nit);
   const NL = { id: nextLayer++, item: nit.id, kind: "atoms", visible: true };
   S.layers.splice(S.layers.indexOf(L) + 1, 0, NL);
@@ -871,11 +877,12 @@ function syncFieldUI() {
   const L = activeField(), f = activeStats();
   $("sec-surface").hidden = !L;
   const it = L && itemOf(L);
-  $("sec-orbital").hidden = !(it && it.wave);
+  $("sec-orbital").hidden = !(it && it.wave && L.w);
   if (!L) return;
   $("field").innerHTML = it.fields.map((g, i) => `<option value="${i}">${esc(g.name)}</option>`).join("");
   $("field").value = L.fi;
-  $("row-field").hidden = it.fields.length < 2;
+  $("row-field").hidden = it.fields.length < 2 || !!L.w;
+  $("row-addfield").hidden = it.fields.length < 2 || !!L.w;
   $("surf").checked = L.visible; $("pm").checked = L.pm; $("opacity").value = L.opacity;
   $("surf-layer").textContent = it.name;
   if (f) {
@@ -884,7 +891,7 @@ function syncFieldUI() {
     else sl.value = Math.round(1000 * (L.iso - f.stats.min) / ((f.stats.max - f.stats.min) || 1));
     $("iso-num").value = fmt(L.iso);
   }
-  if (it.wave) syncWaveUI(it);
+  if (it.wave && L.w) syncWaveUI(L, it);
   levelHint(); summaries();
 }
 /** One sentence on how to read the level, by the kind of field. */
@@ -924,47 +931,93 @@ function setLevelFromSlider(preview) {
   requestSurface(L, preview);
 }
 
-/* ------------------------------------------------------------------ WAVECAR (active field layer of a WAVECAR item) */
+/* ------------------------------------------------------------------ layer colours */
+/** Spin channel a field layer shows: 0 up, 1 down, -1 neither (an unpolarised field or the total density). */
+function spinOf(L) {
+  const it = itemOf(L);
+  if (L.w) return it.wave.nspin === 2 ? L.w.s : -1;
+  const f = it.fields[L.fi], n = f ? f.name : "";
+  return /^spin up\b/.test(n) ? 0 : /^spin down\b/.test(n) ? 1 : -1;
+}
+/** [positive, negative] colours for a field layer: by spin channel where it has one (up warm, down blue), else the
+ *  first pair of FIELD_COLORS that no other surface uses. */
+function pickColors(L) {
+  const f = itemOf(L).fields[L.fi];
+  if (!L.w && f && /^magnetization/.test(f.name)) return [SPIN_COLORS[0][0][0], SPIN_COLORS[1][0][0]];
+  const s = spinOf(L), list = s >= 0 ? SPIN_COLORS[s] : FIELD_COLORS;
+  const used = new Set(fieldLayers().filter(l => l !== L).map(l => l.pos));
+  return (list.find(c => !used.has(c[0])) || list[fieldLayers().indexOf(L) % list.length]).slice();
+}
+function autoColors(L) { if (L.auto) [L.pos, L.neg] = pickColors(L); }
+
+/* ------------------------------------------------------------------ WAVECAR (one band per field layer, in L.w) */
+/** Show band b in layer L, at the layer's own spin, k-point and mode (L.w); the orbital lives in field slot L.fi. */
 async function showBand(L, b) {
-  const it = itemOf(L), w = it.wave, { s, k, mode, half } = it.w;
-  it.w.b = b;
+  const it = itemOf(L), w = it.wave, { s, k, mode, half } = L.w;
+  L.w.b = b;
   busy(true);
   try {
-    const { field } = await call("orbital", { ds: it.ds, s, k, b, signed: mode === "psi" && w.type === "gam", half });
-    it.fields = [field]; L.fi = 0;
+    const { field } = await call("orbital", { ds: it.ds, slot: L.fi, s, k, b, signed: mode === "psi" && w.type === "gam", half });
+    it.fields[L.fi] = field;
     initLevel(L, true);
-    if (L === activeField()) { syncFieldUI(); markBand(it); }
+    autoColors(L);
+    if (L === activeField()) { syncFieldUI(); markBand(L); }
     buildLayersUI();
     requestSurface(L);
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
 }
-function syncWaveUI(it) {
+function syncWaveUI(L, it) {
   const w = it.wave;
   $("row-spin").hidden = w.nspin < 2; $("row-k").hidden = w.nk < 2;
   $("row-wmode").hidden = $("row-half").hidden = w.type !== "gam";
   $("kpt").innerHTML = w.kpts.map((k, i) => `<option value="${i}">${i + 1}: ${k.map(x => x.toFixed(3)).join(" ")}</option>`).join("");
-  $("kpt").value = it.w.k;
-  if ($("bands").dataset.item !== String(it.id) || $("bands").dataset.sk !== `${it.w.s}|${it.w.k}`) buildBands(it);
-  markBand(it); segState();
+  $("kpt").value = L.w.k;
+  if ($("bands").dataset.item !== String(it.id) || $("bands").dataset.sk !== `${L.w.s}|${L.w.k}`) buildBands(L, it);
+  markBand(L); segState();
 }
-function buildBands(it) {
-  const w = it.wave, { s, k } = it.w, e = w.eig[s][k], o = w.occ[s][k], fr = w.frontier[s][k], list = $("bands"), rows = [];
+function buildBands(L, it) {
+  const w = it.wave, { s, k } = L.w, e = w.eig[s][k], o = w.occ[s][k], fr = w.frontier[s][k], list = $("bands"), rows = [];
   for (let b = 0; b < w.nb; b++) {
     const cls = ["band", o[b] > 0.5 ? "occ" : "", b === fr.homo ? "homo" : "", b === fr.lumo ? "lumo" : ""].join(" ");
     rows.push(`<div class="${cls}" role="option" data-b="${b}" aria-selected="false"><span>${b + 1}</span><span class="e">${e[b].toFixed(3)}</span><span class="o">${o[b].toFixed(2)}</span></div>`);
   }
   list.innerHTML = rows.join("");
   list.dataset.item = String(it.id); list.dataset.sk = `${s}|${k}`;
-  const h = list.querySelector(`[data-b="${Math.max(0, it.w.b >= 0 ? it.w.b : fr.homo)}"]`);
+  const h = list.querySelector(`[data-b="${Math.max(0, L.w.b >= 0 ? L.w.b : fr.homo)}"]`);
   if (h) list.scrollTop = h.offsetTop - list.clientHeight / 2;
 }
-function markBand(it) {
-  for (const el of $("bands").querySelectorAll('[aria-selected="true"]')) el.setAttribute("aria-selected", "false");
-  const el = $("bands").querySelector(`[data-b="${it.w.b}"]`);
-  if (el) el.setAttribute("aria-selected", "true");
+/** Select the active layer's band in the list, and mark (in its surface colour) every band of this spin and k-point
+ *  that a visible layer of the same WAVECAR shows. */
+function markBand(L) {
+  for (const el of $("bands").querySelectorAll('[aria-selected="true"], .shown')) { el.setAttribute("aria-selected", "false"); el.classList.remove("shown"); el.style.removeProperty("--dot"); }
+  for (const l of fieldLayers(true)) {
+    if (!l.w || l.item !== L.item || l.w.s !== L.w.s || l.w.k !== L.w.k) continue;
+    const el = $("bands").querySelector(`[data-b="${l.w.b}"]`);
+    if (el) { el.classList.add("shown"); el.style.setProperty("--dot", l.pos); }
+  }
+  const el = $("bands").querySelector(`[data-b="${L.w.b}"]`);
+  if (el) { el.setAttribute("aria-selected", "true"); if (el.scrollIntoView) el.scrollIntoView({ block: "nearest" }); }
 }
-const activeWave = () => { const L = activeField(); const it = L && itemOf(L); return it && it.wave ? { L, it } : null; };
+const activeWave = () => { const L = activeField(); const it = L && itemOf(L); return it && it.wave && L.w ? { L, it } : null; };
+/** Another surface layer from the same file as layer `from`: band b (default: the same band) of a WAVECAR, or the
+ *  next channel no layer shows yet of a multi-field file (CHGCAR: total, magnetization, spin up, spin down). The new
+ *  layer keeps the enclosed share of `from` and becomes the active one. */
+async function addSurfaceLayer(from, b = null) {
+  const it = itemOf(from);
+  if (!it || (!from.w && it.fields.length < 2)) return;
+  const L = { id: nextLayer++, item: it.id, kind: "field", visible: true, fi: from.fi, pm: from.pm, opacity: from.opacity, pos: from.pos, neg: from.neg,
+    cuts: [], mesh: null, p: from.p, mode: from.mode, iso: from.iso, auto: true };
+  if (from.w) { L.w = { ...from.w }; L.fi = it.nextSlot++; }
+  else {
+    const shown = new Set(fieldLayers().filter(l => l.item === it.id).map(l => l.fi)), free = it.fields.findIndex((_, i) => !shown.has(i));
+    L.fi = free >= 0 ? free : from.fi;
+  }
+  S.layers.splice(S.layers.indexOf(from) + 1, 0, L);
+  S.active = L.id;
+  if (L.w) { buildLayersUI(); await showBand(L, b ?? Math.max(0, from.w.b)); }
+  else { initLevel(L, true); autoColors(L); buildLayersUI(); syncFieldUI(); requestSurface(L); }
+}
 
 /* ------------------------------------------------------------------ layers panel */
 function buildLayersUI() {
@@ -1008,9 +1061,10 @@ $("layers").addEventListener("click", e => {
 $("layers").addEventListener("input", e => {
   const row = e.target.closest(".layer"), L = row && layerById(+row.dataset.id);
   if (!L) return;
-  if (e.target.classList.contains("cpos")) L.pos = e.target.value;
-  if (e.target.classList.contains("cneg")) L.neg = e.target.value;
+  if (e.target.classList.contains("cpos")) { L.pos = e.target.value; L.auto = false; }
+  if (e.target.classList.contains("cneg")) { L.neg = e.target.value; L.auto = false; }
   restyleLayer(L);
+  const aw = activeWave(); if (aw) markBand(aw.L);
 });
 function removeLayer(L) {
   const index = S.layers.indexOf(L);
@@ -1065,7 +1119,7 @@ async function addItem(d, adding, quiet = false) {
   if (!(await ensureRenderer())) return;
   if (!adding) clearScene();
   const notes = [...(d.notes || [])];
-  const it = { id: nextItem++, name: d.name, ds: d.ds, structure: d.structure, wave: d.wave || null, traj: d.traj || null, fields: d.fields || [], w: { s: 0, k: 0, b: -1, mode: "density", half: "x" },
+  const it = { id: nextItem++, name: d.name, ds: d.ds, structure: d.structure, wave: d.wave || null, traj: d.traj || null, fields: d.fields || [], nextSlot: (d.fields || []).length,
     key: d.key || Math.random().toString(36).slice(2) + Date.now().toString(36), files: d.files || null, example: d.example || null, kept: false };
   if (it.wave && !(it.structure && sameCell(it.structure.lattice, it.wave.lattice))) {
     if (it.structure) notes.push("the structure's cell differs from the WAVECAR's, so only the cell is drawn");
@@ -1082,11 +1136,13 @@ async function addItem(d, adding, quiet = false) {
   }
   let FL = null;
   if (it.fields.length || it.wave) {
-    const c = FIELD_COLORS[fieldLayers().length % FIELD_COLORS.length];
-    FL = { id: nextLayer++, item: it.id, kind: "field", visible: true, fi: 0, pm: true, opacity: 0.85, pos: c[0], neg: c[1], cuts: [], mesh: null };
+    FL = { id: nextLayer++, item: it.id, kind: "field", visible: true, fi: 0, pm: true, opacity: 0.85, pos: "", neg: "", cuts: [], mesh: null, auto: true };
+    // a WAVECAR layer shows one band (L.w) in a field slot of its own after the file's fields
+    if (it.wave) { FL.w = { s: 0, k: 0, b: -1, mode: "density", half: "x" }; FL.fi = it.nextSlot++; }
     S.layers.push(FL);
     S.active = FL.id;
-    if (it.fields.length) initLevel(FL, false);
+    [FL.pos, FL.neg] = pickColors(FL);
+    if (it.fields.length && !it.wave) initLevel(FL, false);
   }
   S.atlas = buildAtlas(atlasSpecies());
   $("empty").hidden = true;
@@ -1128,10 +1184,10 @@ function serialize(withFiles = false) {
   const index = new Map(items.map((it, k) => [it.id, k]));
   const state = {
     v: 1, saved: Date.now(),
-    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, w: it.w, hadFiles: !!(it.files && it.files.length),
+    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, hadFiles: !!(it.files && it.files.length),
       structure: it.structure && (!it.kept && !it.example || it.structure.ids) && !(it.traj && it.kept) ? it.structure : null,
       ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
-    layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts } : {}) })),
+    layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts, auto: !!L.auto, w: L.w } : {}) })),
     view: { style: S.style, look: S.look, scale: S.scale, bonds: S.bonds, tol: S.tol, cell: S.cell, reps: S.reps.slice(), boundary: S.boundary, res: S.res, proj: S.proj, t: S.t.slice(),
       frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
       labels: S.labels.map(l => ({ layer: S.layers.findIndex(L => L.id === l.layer), src: l.src, p: l.p })) },
@@ -1164,7 +1220,8 @@ async function restoreScene(st, files, stored = true) {
       let d = null;
       try {
         if (sp.example === "h3d") d = await call("example", { name: "h3d" });
-        else if (sp.kept) { const f = await files(sp.key); if (f && f.length) d = { ...(await call("open", { files: f })), files: f }; }
+        // WHY: Undo of New scene has every file in memory, also those too large (or unable) to be kept in storage
+        else if (sp.kept || !stored) { const f = await files(sp.key); if (f && f.length) d = { ...(await call("open", { files: f })), files: f }; }
         if (!d && sp.structure) d = { ds: null, structure: sp.structure, fields: [], wave: null, traj: null, notes: [] };
       } catch (e) { d = null; }
       if (!d) { missing.push(sp.name); made.push(null); continue; }
@@ -1180,10 +1237,19 @@ async function restoreScene(st, files, stored = true) {
     for (const ls of st.layers) {
       const it = made[ls.item];
       if (!it) continue;
-      const L = S.layers.find(l => l.item === it.id && l.kind === ls.kind && !order.includes(l));
+      let L = S.layers.find(l => l.item === it.id && l.kind === ls.kind && !order.includes(l));
+      // a further surface of the same file (another band or channel) gets a layer of its own
+      if (!L && ls.kind === "field" && (it.wave || it.fields.length > 1)) {
+        L = { id: nextLayer++, item: it.id, kind: "field", visible: true, fi: 0, pm: true, opacity: 0.85, pos: "", neg: "", cuts: [], mesh: null };
+        if (it.wave) { L.w = { s: 0, k: 0, b: -1, mode: "density", half: "x" }; L.fi = it.nextSlot++; }
+      }
       if (!L) continue;
       L.visible = ls.visible;
-      if (L.kind === "field") Object.assign(L, { fi: Math.min(ls.fi, Math.max(0, it.fields.length - 1)), iso: ls.iso, p: ls.p, mode: ls.mode, pm: ls.pm, opacity: ls.opacity, pos: ls.pos, neg: ls.neg, cuts: ls.cuts || [] });
+      if (L.kind === "field") {
+        Object.assign(L, { iso: ls.iso, p: ls.p, mode: ls.mode, pm: ls.pm, opacity: ls.opacity, pos: ls.pos, neg: ls.neg, cuts: ls.cuts || [], auto: !!ls.auto });
+        if (!L.w) L.fi = Math.min(ls.fi, Math.max(0, it.fields.length - 1));
+        else { const sw = ls.w || st.items[ls.item].w; if (sw) L.want = { ...sw }; }  // st.items[].w: scenes saved before v18
+      }
       order.push(L);
     }
     for (const L of S.layers) if (!order.includes(L) && L.kind === "field") R.removeMeshGroup(L.id);
@@ -1194,9 +1260,10 @@ async function restoreScene(st, files, stored = true) {
     for (const it of trajItems()) applyFrame(it);
     S.labels = (st.view.labels || []).filter(l => order[l.layer]).map(l => ({ i: -1, layer: order[l.layer].id, src: l.src, p: l.p }));
     if (!S.layers.length) { showHome(); return false; }
-    for (const it of made) if (it && it.wave) {
-      const sp = st.items[made.indexOf(it)], FL = S.layers.find(L => L.item === it.id && L.kind === "field");
-      if (FL && sp.w && sp.w.b >= 0 && (sp.w.b !== it.w.b || sp.w.s !== it.w.s || sp.w.k !== it.w.k || sp.w.mode !== it.w.mode)) { it.w = { ...sp.w }; await showBand(FL, sp.w.b); }
+    for (const L of order) if (L.kind === "field" && L.w) {
+      const want = L.want, w = L.w;
+      delete L.want;
+      if (want && want.b >= 0 && (want.b !== w.b || want.s !== w.s || want.k !== w.k || want.mode !== w.mode || want.half !== w.half || !itemOf(L).fields[L.fi])) { L.w = { ...want }; await showBand(L, want.b); }
     }
     S.atlas = buildAtlas(atlasSpecies());
     buildLayersUI(); updateChrome(); buildStructure(); syncFieldUI(); syncControls();
@@ -1251,11 +1318,11 @@ function summaries() {
   const L = activeField(), f = activeStats();
   $("sum-surface").textContent = !L || !f ? "" : !L.visible ? "hidden" : L.mode === "log" ? `${fmt(L.iso)} · ${Math.round(100 * fractionAbove(f.stats, L.iso))}%` : fmt(L.iso);
   const aw = activeWave();
-  if (aw && aw.it.w.b >= 0) $("sum-orbital").textContent = `${aw.it.w.b + 1}${aw.it.wave.nspin === 2 ? (aw.it.w.s ? "↓" : "↑") : ""} · ${aw.it.wave.eig[aw.it.w.s][aw.it.w.k][aw.it.w.b].toFixed(2)} eV`;
+  if (aw && aw.L.w.b >= 0) { const w = aw.L.w, n = fieldLayers().filter(l => l.w && l.item === aw.it.id).length; $("sum-orbital").textContent = `${w.b + 1}${aw.it.wave.nspin === 2 ? (w.s ? "↓" : "↑") : ""} · ${aw.it.wave.eig[w.s][w.k][w.b].toFixed(2)} eV${n > 1 ? ` · ${n} bands` : ""}`; }
   $("sum-view").textContent = S.proj === "ortho" ? "ortho" : "perspective";
 }
 function segState() {
-  const aw = activeWave(), w = aw ? aw.it.w : { s: 0, mode: "density", half: "x" };
+  const aw = activeWave(), w = aw ? aw.L.w : { s: 0, mode: "density", half: "x" };
   const val = { style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
   for (const seg of document.querySelectorAll(".seg")) for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === val[seg.dataset.key]));
 }
@@ -1355,6 +1422,7 @@ const OPTIONS = [
   { t: "Repeat (supercell)", sel: "#ra", k: "repeat supercell tile replicate periodic images" },
   { t: "Boundary atoms", sel: "#boundary", k: "boundary faces edge corner atoms wrap images" },
   { t: "Field", sel: "#field", k: "field dataset magnetization spin density channel" },
+  { t: "Add a field as a layer", sel: "#add-field", self: true, k: "several fields both spin up down total magnetization overlay together simultaneously at once another channel" },
   { t: "Show surface", sel: "#surf", k: "surface isosurface show hide on off" },
   { t: "Level (isovalue)", sel: "#iso", k: "level isovalue iso threshold contour value density" },
   { t: "Negative lobe", sel: "#pm", k: "negative lobe sign phase minus" },
@@ -1362,6 +1430,7 @@ const OPTIONS = [
   { t: "Resolution", sel: '.seg[data-key="res"]', k: "resolution quality grid stride smooth coarse" },
   { t: "Band", sel: "#bands", k: "band orbital wavefunction homo lumo state eigenvalue" },
   { t: "Spin", sel: '.seg[data-key="wspin"]', k: "spin up down channel" },
+  { t: "Add a band as a layer", sel: "#add-band", self: true, k: "several bands orbitals both spins up down hole electron overlay together simultaneously at once another wavefunction" },
   { t: "k-point", sel: "#kpt", k: "k-point kpoint kpt" },
   { t: "|ψ|² or ψ", sel: '.seg[data-key="wmode"]', k: "psi wavefunction phase sign density" },
   { t: "Play / pause", sel: "#pl-play", k: "play pause animate animation trajectory movie", self: true },
@@ -1393,7 +1462,7 @@ const OPTIONS = [
 ];
 const WHY = { "sec-surface": "needs a volumetric file", "sec-orbital": "needs a WAVECAR", "sec-traj": "needs a trajectory", player: "needs a trajectory",
   dock: "open a file first", br: "open a file first", bl: "open a file first", "doc-sg": "needs a periodic structure", "btn-new": "open a file first", "e-cut": "needs a surface",
-  "row-cuts": "after a cut", "row-tol": "with bonds on", "row-field": "with several fields", "row-pm": "for signed fields", "mfmt-video": "this browser cannot record video",
+  "row-cuts": "after a cut", "row-tol": "with bonds on", "row-field": "with several fields", "row-addfield": "with several fields", "row-pm": "for signed fields", "mfmt-video": "this browser cannot record video",
   "row-spin": "for spin-polarised WAVECARs", "row-k": "with several k-points", "row-wmode": "for Γ-only WAVECARs", "row-half": "for Γ-only WAVECARs", "tr-spark": "when the file has energies" };
 /** Why a control is not available now ("" when it is). */
 function whyNot(el) {
@@ -1495,16 +1564,23 @@ bindSeg("theme", v => {
 bindSeg("loop", v => { S.loop = v; playDir = 1; });
 bindSeg("mfmt", v => { S.movie.fmt = v; if (v === "video" && S.movie.scale < 0.5) S.movie.scale = 1; movieNote(); });
 bindSeg("msize", v => { S.movie.scale = +v; movieNote(); });
-bindSeg("wspin", v => { const aw = activeWave(); if (!aw) return; aw.it.w.s = +v; buildBands(aw.it); showBand(aw.L, Math.max(0, aw.it.w.b)); });
-bindSeg("wmode", v => { const aw = activeWave(); if (!aw) return; aw.it.w.mode = v; showBand(aw.L, Math.max(0, aw.it.w.b)); });
-bindSeg("half", v => { const aw = activeWave(); if (!aw) return; aw.it.w.half = v; showBand(aw.L, Math.max(0, aw.it.w.b)); });
-$("kpt").addEventListener("change", e => { const aw = activeWave(); if (!aw) return; aw.it.w.k = +e.target.value; buildBands(aw.it); showBand(aw.L, Math.max(0, aw.it.w.b)); });
-$("bands").addEventListener("click", e => { const r = e.target.closest(".band"), aw = activeWave(); if (r && aw) showBand(aw.L, +r.dataset.b); });
+bindSeg("wspin", v => { const aw = activeWave(); if (!aw) return; aw.L.w.s = +v; buildBands(aw.L, aw.it); showBand(aw.L, Math.max(0, aw.L.w.b)); });
+bindSeg("wmode", v => { const aw = activeWave(); if (!aw) return; aw.L.w.mode = v; showBand(aw.L, Math.max(0, aw.L.w.b)); });
+bindSeg("half", v => { const aw = activeWave(); if (!aw) return; aw.L.w.half = v; showBand(aw.L, Math.max(0, aw.L.w.b)); });
+$("kpt").addEventListener("change", e => { const aw = activeWave(); if (!aw) return; aw.L.w.k = +e.target.value; buildBands(aw.L, aw.it); showBand(aw.L, Math.max(0, aw.L.w.b)); });
+// a plain click shows the band in the active layer; Ctrl/Cmd or Shift click adds it as a layer of its own
+$("bands").addEventListener("click", e => {
+  const r = e.target.closest(".band"), aw = activeWave();
+  if (!r || !aw) return;
+  if (e.ctrlKey || e.metaKey || e.shiftKey) addSurfaceLayer(aw.L, +r.dataset.b); else showBand(aw.L, +r.dataset.b);
+});
+$("add-band").addEventListener("click", () => { const aw = activeWave(); if (aw) addSurfaceLayer(aw.L); });
+$("add-field").addEventListener("click", () => { const L = activeField(); if (L && !L.w) addSurfaceLayer(L); });
 $("bands").addEventListener("keydown", e => {
   const aw = activeWave();
   if (!aw || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
   e.preventDefault();
-  const b = Math.min(aw.it.wave.nb - 1, Math.max(0, aw.it.w.b + (e.key === "ArrowDown" ? 1 : -1)));
+  const b = Math.min(aw.it.wave.nb - 1, Math.max(0, aw.L.w.b + (e.key === "ArrowDown" ? 1 : -1)));
   showBand(aw.L, b);
   const el = $("bands").querySelector(`[data-b="${b}"]`); if (el) el.scrollIntoView({ block: "nearest" });
 });
@@ -1530,7 +1606,7 @@ $("t-prim").addEventListener("click", () => derive("primitive"));
 $("t-tol").addEventListener("change", updateSymmetry);
 $("t-conv").addEventListener("click", () => derive("conventional"));
 for (const b of document.querySelectorAll("[data-fmt]")) b.addEventListener("click", () => exportLayer(b.dataset.fmt));
-$("field").addEventListener("change", e => { const L = activeField(); if (!L) return; L.fi = +e.target.value; initLevel(L, true); syncFieldUI(); buildLayersUI(); requestSurface(L); });
+$("field").addEventListener("change", e => { const L = activeField(); if (!L) return; L.fi = +e.target.value; initLevel(L, true); autoColors(L); syncFieldUI(); buildLayersUI(); requestSurface(L); });
 $("surf").addEventListener("change", e => { const L = activeField(); if (!L) return; L.visible = e.target.checked; requestSurface(L); buildLayersUI(); summaries(); });
 $("pm").addEventListener("change", e => { const L = activeField(); if (!L) return; L.pm = e.target.checked; requestSurface(L); });
 $("opacity").addEventListener("input", e => { const L = activeField(); if (!L) return; L.opacity = +e.target.value; restyleLayer(L); });

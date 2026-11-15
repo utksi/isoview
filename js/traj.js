@@ -14,9 +14,9 @@
  * or alat and Ry; CASTEP .md/.geom in Bohr and Hartree; GROMACS .gro in nm. Conversions: BOHR = 0.529177210903 A,
  * Ry = 13.605693122994 eV, Ha = 2 Ry, nm = 10 A.
  */
-import { Cursor, tokens } from "./numbers.js?v=17";
-import { elementOf, SYMBOLS } from "./elements.js?v=17";
-import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=17";
+import { Cursor, tokens } from "./numbers.js?v=18";
+import { elementOf, SYMBOLS } from "./elements.js?v=18";
+import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=18";
 
 const RY = 13.605693122994; // eV
 const HA = 2 * RY; // eV

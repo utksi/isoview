@@ -120,6 +120,7 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .band .o { text-align: right; }
 .band .t { grid-column: 1 / -1; display: none; }
 .band.homo, .band.lumo { box-shadow: inset 2px 0 0 var(--line2); }
+.band.shown { box-shadow: inset 4px 0 0 var(--dot, var(--accent)); }
 
 /* bottom left: triad and info */
 .bl { position: fixed; z-index: 2; left: calc(46px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px));

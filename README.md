@@ -37,6 +37,12 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   Signed fields show a positive and a negative surface.
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
+  **Add a band as a layer** (or Ctrl/⌘-click a band) shows several bands at once, for example a hole in spin ↓
+  and an electron in spin ↑: each band layer has its own spin, k-point, level and colour, and the band list marks
+  the bands on show in their surface colours. Spin-up bands are drawn in warm colours and spin-down bands in blues.
+- **Several fields of one file**: **Add a field as a layer** (Surface panel) shows another channel of the same
+  file next to the first, such as a CHGCAR's spin up and spin down, or its total density and magnetization. Spin up is
+  warm, spin down blue, and a magnetization shows its spin-up excess warm and its spin-down excess blue.
 - **Layers**: every file adds layers (its atoms, its field). Drag files onto the right half of the window, or use
   "Add files to the scene", to superimpose them: a PARCHG on a CHGCAR, a CONTCAR on a WAVECAR, two orbitals from
   different runs. Each field layer has its own level, opacity and colours; layers can be hidden or removed.

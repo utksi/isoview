@@ -7,7 +7,7 @@
  *   open { files }                        -> { ds, structure, fields: [meta], wave: header | null, traj | null, notes, title }
  *                                            (traj: the frames of a trajectory file, traj.js; its arrays are transferred)
  *   example { name: 'h3d' }               -> same shape (hydrogen 3d(x2 - y2) orbital computed here)
- *   orbital { ds, s, k, b, signed, half } -> { field: meta }  (becomes field 0 of dataset ds)
+ *   orbital { ds, slot, s, k, b, signed, half } -> { field: meta }  (becomes field `slot` of dataset ds)
  *   mesh { ds, fi, reps, stride, isos: [..], shift, cuts }
  *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
  *   drop { ds }                           -> {}  (frees the dataset)
@@ -19,11 +19,11 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=17";
-import { isUlm, parseAseTraj } from "./traj.js?v=17";
-import { Wavecar } from "./wavecar.js?v=17";
-import { stats, renderGrid, refine } from "./field.js?v=17";
-import { marchingCubes } from "./gfx/mc.js?v=17";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=18";
+import { isUlm, parseAseTraj } from "./traj.js?v=18";
+import { Wavecar } from "./wavecar.js?v=18";
+import { stats, renderGrid, refine } from "./field.js?v=18";
+import { marchingCubes } from "./gfx/mc.js?v=18";
 
 const DS = new Map();
 let nextDs = 1;
@@ -99,7 +99,8 @@ export async function handle(msg) {
     const w = W.wave, r = await w.orbital(msg.s, msg.k, msg.b, { signed: msg.signed, half: msg.half });
     const f = { name: `band ${msg.b + 1}${w.nspin === 2 ? (msg.s ? " ↓" : " ↑") : ""}${r.signed ? " ψ" : " |ψ|²"}`, unit: r.signed ? "Å⁻³ᐟ²" : "Å⁻³",
       n: r.n, n0: r.n0, data: r.data, origin: [0, 0, 0], span: w.lattice, periodic: true, closed: false, kind: r.signed ? "signed" : "density" };
-    W.fields = [f];
+    // WHY: one slot per orbital layer (msg.slot, after the file's own fields), so several bands can be shown at once
+    W.fields[msg.slot ?? 0] = f;
     const m = meta(f);
     return { result: { field: m }, transfer: transfers(m) };
   }
@@ -116,8 +117,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=17").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=17", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=18").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=18", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;

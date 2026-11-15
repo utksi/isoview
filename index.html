@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=17">
+<link rel="stylesheet" href="css/style.css?v=18">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -77,6 +77,7 @@
     <div class="body">
       <div class="row"><span class="lab">Layer</span><span class="num-plain ell" id="surf-layer"></span></div>
       <div class="row" id="row-field"><label class="lab" for="field">Field</label><select id="field"></select></div>
+      <div class="row-btns" id="row-addfield"><button type="button" id="add-field" class="ghost" title="Show another channel of this file (total, magnetization, spin up, spin down) as a layer of its own">＋ Add a field as a layer</button></div>
       <div class="row"><label class="lab" for="surf">Show</label><input type="checkbox" class="sw" id="surf" checked></div>
       <div class="row col"><div class="lv"><label class="lab" for="iso">Level</label><input id="iso-num" class="num-in" inputmode="decimal" aria-label="isovalue" spellcheck="false"></div><input type="range" id="iso" min="0" max="1000" step="1"><div class="hint" id="iso-hint"></div><p class="note iso-note" id="iso-note"></p></div>
       <div class="row" id="row-pm"><label class="lab" for="pm">Negative lobe</label><input type="checkbox" class="sw" id="pm" checked></div>
@@ -93,6 +94,8 @@
       <div class="row" id="row-k"><label class="lab" for="kpt">k-point</label><select id="kpt"></select></div>
       <div class="row" id="row-wmode"><span class="lab">Show</span><div class="seg" data-key="wmode"><button type="button" value="density">|ψ|²</button><button type="button" value="psi">ψ</button></div></div>
       <div class="bands" id="bands" role="listbox" aria-label="Bands" tabindex="0"></div>
+      <div class="row-btns"><button type="button" id="add-band" class="ghost" title="Show another band of this WAVECAR at the same time, in a layer with its own spin, level and colour">＋ Add a band as a layer</button></div>
+      <p class="note band-note">Ctrl/⌘-click a band to add it straight away. Each band layer keeps its own spin, level and colour (↑ warm, ↓ blue).</p>
       <div class="row" id="row-half"><span class="lab">Γ half grid</span><div class="seg" data-key="half"><button type="button" value="x">x</button><button type="button" value="z">z</button></div></div>
     </div>
   </details>
@@ -180,6 +183,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=17"></script>
+<script type="module" src="js/app.js?v=18"></script>
 </body>
 </html>
