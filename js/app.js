@@ -253,6 +253,13 @@ function rows(toward, up) {
   return [cross(u, t), u, t];
 }
 function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); }
+/** Re-centre the rotation pivot (and the depth range) on what is shown now, keeping the orientation and the zoom
+ *  relative to the scene size; used whenever layers are added, removed, hidden or restored. */
+function refit() {
+  const s = sceneSphere(), k = cam.dist / cam.radius;
+  cam.target = s.c.slice(); cam.radius = Math.max(s.r, 0.5); cam.dist = k * cam.radius;
+  requestRender();
+}
 function viewAlong(i) {
   const pc = primaryCell();
   if (!pc) return;
@@ -425,8 +432,9 @@ function undo() {
   else if (u.type === "shift") setShift(u.old, false);
   else if (u.type === "layer") {
     S.layers.splice(Math.min(u.index, S.layers.length), 0, u.layer);
-    if (u.layer.kind === "atoms") buildStructure(); else { S.active = u.layer.id; requestSurface(u.layer); syncFieldUI(); }
-    buildLayersUI(); updateChrome();
+    if (u.layer.kind === "atoms") buildStructure(); else { S.active = u.layer.id; requestSurface(u.layer); syncFieldUI(); buildStructure(); }
+    $("empty").hidden = true;
+    buildLayersUI(); updateChrome(); refit();
   }
   toast("Undone.", false, 2500);
 }
@@ -629,7 +637,7 @@ $("layers").addEventListener("click", e => {
   if (e.target.closest(".eye")) {
     L.visible = !L.visible;
     if (L.kind === "field") { requestSurface(L); if (L === activeField()) $("surf").checked = L.visible; }
-    buildStructure(); buildLayersUI();
+    buildStructure(); buildLayersUI(); refit();
   } else if (e.target.closest(".rm")) removeLayer(L);
   else if (L.kind === "field" && !e.target.closest("input")) { S.active = L.id; buildLayersUI(); syncFieldUI(); $("sec-surface").open = true; }
 });
@@ -646,8 +654,12 @@ function removeLayer(L) {
   pushUndo({ type: "layer", layer: L, index });
   if (L.kind === "field") { R.removeMeshGroup(L.id); L.mesh = null; if (S.active === L.id) S.active = (fieldLayers()[0] || {}).id ?? null; syncFieldUI(); }
   S.sel = S.sel.filter(s => s.layer !== L.id); S.labels = S.labels.filter(s => s.layer !== L.id);
-  buildStructure(); buildLayersUI(); updateChrome(); requestRender();
-  toast("Layer removed.", false, 6000, { label: "Undo", fn: undo });
+  // if only hidden layers are left (e.g. a duplicate atoms layer), show them rather than an empty view
+  if (S.layers.length && !S.layers.some(l => l.visible)) for (const l of S.layers) { l.visible = true; if (l.kind === "field") requestSurface(l); }
+  buildStructure(); buildLayersUI(); updateChrome();
+  if (!S.layers.length) { setLabelMode(false); setBoxMode(false); showHome(); }
+  else refit();
+  toast(S.layers.length ? "Layer removed." : "Removed the last layer.", false, 6000, { label: "Undo", fn: undo });
 }
 
 /* ------------------------------------------------------------------ loading */
@@ -710,7 +722,7 @@ async function addItem(d, adding) {
   S.atlas = buildAtlas(atlasSpecies());
   $("empty").hidden = true;
   buildLayersUI(); updateChrome(); buildStructure();
-  if (!adding) resetView();
+  if (!adding) resetView(); else refit();
   for (const id of ["sec-layers", "sec-structure", "sec-surface", "sec-orbital", "sec-view"]) $(id).open = false;
   if (adding) $("sec-layers").open = true;
   syncFieldUI();
