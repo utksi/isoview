@@ -10,12 +10,18 @@
 import fs from "node:fs";
 import { readNumbers } from "../js/numbers.js";
 import { SYMBOLS, elementOf, rcov, colorOf } from "../js/elements.js";
-import { fromParams, params, det3, formula, norm } from "../js/lattice.js";
+import { fromParams, params, det3, formula, norm, dot } from "../js/lattice.js";
 import { parseText, detectKind, parseSymop, qeLattice, isWavecarHeader } from "../js/formats.js";
 import { fft1 } from "../js/fft.js";
 import { stats, renderGrid, isoForFraction, fractionAbove } from "../js/field.js";
 import { displayAtoms, bondList } from "../js/structure.js";
 import { Wavecar } from "../js/wavecar.js";
+import { marchingCubes } from "../js/gfx/mc.js";
+import { Camera, qfromRows, qmat, pickSphere } from "../js/gfx/camera.js";
+import { distance, angle, dihedral, measureAll } from "../js/measure.js";
+import { packAtoms, packBonds } from "../js/gfx/renderer.js";
+import { packLabels } from "../js/gfx/labels.js";
+import { handle } from "../js/worker.js";
 
 let fails = 0, n = 0;
 const ok = (cond, msg) => { n++; if (!cond) { fails++; console.log("FAIL", msg); } else console.log("ok  ", msg); };
@@ -112,7 +118,7 @@ for (const len of [8, 7, 12]) {
 {
   const f = { n: [2, 2, 2], data: Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8]), origin: [0, 0, 0], span: [[2, 0, 0], [0, 2, 0], [0, 0, 2]], periodic: true, closed: false };
   const g = renderGrid(f, [1, 1, 1], 1);
-  ok(g.size.join() === "3,3,3" && g.data[0] === 1 && g.data[1] === 5 && g.data[2] === 1 && g.data[3] === 3 && g.data[9] === 2 && g.data[26] === 1 && g.vox[0][0] === 1, "render grid: periodic closure, x-outer order");
+  ok(g.size.join() === "3,3,3" && g.data[0] === 1 && g.data[1] === 2 && g.data[2] === 1 && g.data[3] === 3 && g.data[9] === 5 && g.data[26] === 1 && g.vox[0][0] === 1, "render grid: periodic closure, x-fastest order");
   const st = stats(f);
   ok(near(st.integral, 36, 1e-9) && near(fractionAbove(st, 4.5), 26 / 36, 1e-12) && isoForFraction(st, 0.5) > 0, "field stats: integral and enclosed fraction");
   const at = displayAtoms({ lattice: [[4, 0, 0], [0, 4, 0], [0, 0, 4]], pbc: true, species: ["Cu"], pos: Float64Array.from([0, 0, 0]) }, { reps: [1, 1, 1], boundary: true });
@@ -124,6 +130,77 @@ for (const len of [8, 7, 12]) {
 {
   const h = new Float64Array([4096, 2, 45200]).buffer;
   ok(isWavecarHeader(h) && !isWavecarHeader(new TextEncoder().encode("Cs2AgInCl6 POSCAR line one....").buffer), "WAVECAR header detection");
+}
+
+/* marching cubes: sphere |r| = R in a periodic-free box -> closed mesh, area 4 pi R^2, radial normals */
+{
+  const n = 41, L = 10, h = L / (n - 1), R0 = 3.1, data = new Float32Array(n * n * n);
+  for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) data[i + n * (j + n * k)] = R0 - Math.hypot(-L / 2 + i * h, -L / 2 + j * h, -L / 2 + k * h);
+  const m = marchingCubes({ data, size: [n, n, n], vox: [[h, 0, 0], [0, h, 0], [0, 0, h]], origin: [-L / 2, -L / 2, -L / 2] }, 0);
+  const P = m.positions, I = m.indices, edges = new Map();
+  let area = 0, rerr = 0, nerr = 0;
+  for (let t = 0; t < I.length; t += 3) {
+    const a = I[t], b = I[t + 1], c = I[t + 2];
+    const u = [0, 1, 2].map(q => P[3 * b + q] - P[3 * a + q]), v = [0, 1, 2].map(q => P[3 * c + q] - P[3 * a + q]);
+    area += 0.5 * norm([u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]);
+    for (const [x, y] of [[a, b], [b, c], [c, a]]) { const key = Math.min(x, y) + "," + Math.max(x, y); edges.set(key, (edges.get(key) || 0) + 1); }
+  }
+  for (let v = 0; v < P.length / 3; v++) {
+    const p = [P[3 * v], P[3 * v + 1], P[3 * v + 2]], r = norm(p);
+    rerr = Math.max(rerr, Math.abs(r - R0));
+    const nn = [m.normals[4 * v], m.normals[4 * v + 1], m.normals[4 * v + 2]].map(x => x / 32767);
+    nerr = Math.max(nerr, 1 - (nn[0] * p[0] + nn[1] * p[1] + nn[2] * p[2]) / (r * norm(nn)));
+  }
+  const open = [...edges.values()].filter(c => c !== 2).length;
+  ok(open === 0 && near(area, 4 * Math.PI * R0 * R0, 0.01 * 4 * Math.PI * R0 * R0) && rerr < 0.02 && nerr < 1e-3 && P.length / 3 < m.triangles,
+    `marching cubes sphere: ${m.triangles} triangles, ${P.length / 3} shared vertices, open edges ${open}, area ${area.toFixed(3)} vs ${(4 * Math.PI * R0 * R0).toFixed(3)}, max |r - R| ${rerr.toFixed(3)} A, normal error ${nerr.toExponential(1)}`);
+}
+/* camera: the pixel ray through a projected point passes through it; view-along rotations are right-handed */
+{
+  const c = new Camera(); c.w = 800; c.h = 600; c.fit([1, 2, 3], 6); c.rotateBy(120, -45);
+  for (const ortho of [false, true]) {
+    c.ortho = ortho;
+    const p = [2.5, 1.0, 4.2], s = c.project(p), r = c.ray(s.x, s.y);
+    const w = [0, 1, 2].map(i => p[i] - r.o[i]), t = dot(w, r.d), miss = norm([0, 1, 2].map(i => w[i] - t * r.d[i]));
+    ok(miss < 1e-6 && t > 0, `camera (${ortho ? "orthographic" : "perspective"}): ray through the projected pixel misses the point by ${miss.toExponential(1)} A`);
+  }
+  const q = qfromRows([[0, 1, 0], [0, 0, 1], [1, 0, 0]]), M = qmat(q);
+  ok(near(M[2][0], 1, 1e-12) && near(M[0][1], 1, 1e-12) && near(M[1][2], 1, 1e-12), "quaternion from view rows: along x, b right, c up");
+  const idx = pickSphere({ o: [0, 0, 10], d: [0, 0, -1] }, Float32Array.from([0, 0, 0, 0, 0, 3, 5, 0, 0]), Float32Array.from([1, 1, 1]));
+  ok(idx === 1, "pickSphere returns the nearest sphere on the ray");
+}
+/* measurements */
+{
+  ok(near(distance([0, 0, 0], [3, 4, 0]), 5, 1e-12) && near(angle([1, 0, 0], [0, 0, 0], [0, 1, 0]), 90, 1e-9), "distance and angle");
+  ok(near(dihedral([1, 0, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]), 90, 1e-9) && near(dihedral([1, 0, 0], [0, 0, 0], [0, 0, 1], [1, 0, 1]), 0, 1e-9), "dihedral 90 and 0 degrees");
+  const m = measureAll([[0, 0, 0], [1, 0, 0], [1, 1, 0], [1, 1, 1]]);
+  ok(m.bonds.length === 3 && m.angles.length === 2 && near(m.angles[0], 90, 1e-9) && near(Math.abs(m.dihedral), 90, 1e-9), "measureAll for four atoms");
+}
+/* instance packing */
+{
+  const a = new Float32Array(packAtoms([{ x: 1, y: 2, z: 3, r: 0.5, color: "#ff8000", sel: true }])), ab = new Uint8Array(a.buffer);
+  ok(a.length === 5 && a[2] === 3 && a[3] === 0.5 && ab[16] === 255 && ab[17] === 128 && ab[19] === 128, "atom instance layout (20 B, selection flag in alpha)");
+  const b = new Float32Array(packBonds([{ p0: [1, 2, 3], p1: [4, 5, 6], c0: "#010203", c1: "#040506", r: 0.1 }])), bb = new Uint8Array(b.buffer);
+  ok(b.length === 9 && b[5] === 6 && near(b[8], 0.1, 1e-7) && bb[24] === 1 && bb[28] === 4, "bond instance layout (36 B)");
+  const l = new Float32Array(packLabels([{ x: 1, y: 2, z: 3, r: 0.6, text: "Ag", color: "#c0c0c0" }], { Ag: { uv: [0.1, 0.2, 0.3, 0.4], aspect: 1.3 } })), lb = new Uint8Array(l.buffer);
+  ok(l.length === 11 && near(l[4], 0.1, 1e-7) && near(l[8], 1.3, 1e-6) && lb[36] === 23 && lb[39] === 255, "label instance layout (44 B, dark text on a light atom)");
+}
+/* worker: open a CIF and a cube, then mesh the cube field */
+{
+  const cif = new File([fs.readFileSync(new URL("../examples/rutile-TiO2.cif", import.meta.url))], "rutile-TiO2.cif");
+  const r1 = await handle({ op: "open", files: [cif] });
+  ok(r1.result.structure.species.length === 6 && r1.result.fields.length === 0, "worker open: CIF structure");
+  const n = 21, v = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) v.push(Math.exp(-((i - 10) ** 2 + (j - 10) ** 2 + (k - 10) ** 2) / 20));
+  const cube = new File([`t\nt\n 1 0 0 0\n ${n} 0.3 0 0\n ${n} 0 0.3 0\n ${n} 0 0 0.3\n 1 0 3.0 3.0 3.0\n ${v.join(" ")}\n`], "g.cube");
+  const r2 = await handle({ op: "open", files: [cube] });
+  const f = r2.result.fields[0];
+  ok(f && f.kind === "density" && f.stats && f.stats.sorted.length === n * n * n && !("data" in f), "worker open: cube field metadata and stats, no raw data");
+  const r3 = await handle({ op: "mesh", fi: 0, reps: [1, 1, 1], stride: 1, isos: [0.5] });
+  const mm = r3.result.meshes[0];
+  ok(mm.triangles > 100 && mm.indices.length === 3 * mm.triangles && r3.transfer.length === 3, `worker mesh: ${mm.triangles} triangles, buffers transferred`);
+  const r4 = await handle({ op: "example", name: "h3d" });
+  ok(r4.result.fields[0].kind === "signed" && near(r4.result.fields[0].stats.integral, 0, 1e-6), "worker example: hydrogen 3d orbital (signed, integral 0)");
 }
 
 /* optional: real files */

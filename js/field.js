@@ -9,7 +9,7 @@
  * Render grid: voxel (I, J, K) takes the value at source index (I s, J s, K s) (stride s), wrapped periodically for
  * periodic grids, which are extended by one plane per axis (and tiled over the supercell repetition r) so the
  * surface closes at the far faces. Voxel vectors span[a] * s / d_a with d = n (periodic) or n - 1 (general grid).
- * Output order is x outermost, z innermost (the order the renderer indexes).
+ * Output order: x index fastest (I + mx (J + my K)), as read by the marching cubes (gfx/mc.js).
  */
 import { det3 } from "./lattice.js";
 
@@ -58,21 +58,21 @@ export function autoStride(f, r, budget) {
   return 16;
 }
 
-/** Resampled grid { data (x outer, z inner), size [mx, my, mz], vox [3 vectors], origin } for the renderer. */
+/** Resampled grid { data (x fastest), size [mx, my, mz], vox [3 vectors], origin } for the marching cubes. */
 export function renderGrid(f, reps = [1, 1, 1], s = 1) {
   const r = f.periodic ? reps : [1, 1, 1];
   const [nx, ny, nz] = f.n, m = counts(f, r, s), d = f.data;
   const den = f.periodic ? f.n : f.n.map(n => n - 1);
   const vox = f.span.map((v, a) => v.map(c => c * s / den[a]));
   const out = new Float32Array(m[0] * m[1] * m[2]);
-  const iz = new Int32Array(m[2]);
-  for (let K = 0; K < m[2]; K++) iz[K] = ((K * s) % nz) * nx * ny;
+  const ix = new Int32Array(m[0]);
+  for (let I = 0; I < m[0]; I++) ix[I] = (I * s) % nx;
   let p = 0;
-  for (let I = 0; I < m[0]; I++) {
-    const ix = (I * s) % nx;
+  for (let K = 0; K < m[2]; K++) {
+    const kz = ((K * s) % nz) * nx * ny;
     for (let J = 0; J < m[1]; J++) {
-      const base = ix + nx * ((J * s) % ny);
-      for (let K = 0; K < m[2]; K++) out[p++] = d[base + iz[K]];
+      const base = kz + nx * ((J * s) % ny);
+      for (let I = 0; I < m[0]; I++) out[p++] = d[base + ix[I]];
     }
   }
   return { data: out, size: m, vox, origin: f.origin.slice() };

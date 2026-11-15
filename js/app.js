@@ -1,42 +1,47 @@
 /**
- * isoview application: file loading, UI state and drawing with 3Dmol.js (global $3Dmol).
+ * isoview application: UI state, camera control, picking and measurement, and the hand-off to the renderer
+ * (gfx/renderer.js: WebGPU or WebGL2) and the compute worker (worker.js: parsing, WAVECAR orbitals, marching cubes).
  *
- * Isosurfaces: a field is resampled by field.renderGrid (periodic closure, supercell tiling, stride) and handed to
- * 3Dmol as a VolumeData whose index -> Cartesian map is the matrix [va vb vc origin] built from the voxel vectors
- * (a 2x2x2 cube header sets the matrix, then size and data are replaced). Level slider: log10 |iso| over six decades
- * below max |f| for densities and signed fields (+iso and, when the field has a negative part, -iso), linear over
- * [min, max] for potentials and ELF. The readout gives the share of sum |f| inside the surface (field.fractionAbove).
- * Views along a lattice vector: rows [right, up, toward] of the world-to-view rotation, converted to the quaternion
- * that 3Dmol stores in getView()[4..7].
+ * Frames are drawn on demand (one requestAnimationFrame per change). Atoms are picked by casting the pointer ray
+ * against the drawn spheres (gfx/camera.js pickSphere); 2, 3 and 4 selected atoms give distances, the angle at each
+ * middle atom and the dihedral (measure.js). Level slider: log10 |iso| over six decades below max |f| (densities,
+ * signed fields; signed fields get +iso and -iso surfaces), linear over [min, max] (potentials, ELF); the readout is
+ * the share of sum |f| inside the surface. Views along a lattice vector use the rotation rows [right, up, toward].
+ * Label mode (L): clicks put the element symbol on atoms or take it off; labels are drawn by the renderer on the front
+ * of each atom (gfx/labels.js) and stay until cleared, also after the mode is switched off.
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js";
-import { Wavecar } from "./wavecar.js";
-import { stats, fractionAbove, isoForFraction, autoStride, renderGrid } from "./field.js";
+import { params, formula, det3, norm, cross, dot } from "./lattice.js";
+import { fractionAbove, isoForFraction, autoStride } from "./field.js";
 import { displayAtoms, bondList } from "./structure.js";
 import { colorOf, rcov, IONIC_CATIONS } from "./elements.js";
-import { params, formula, det3, norm, cross, dot } from "./lattice.js";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js";
+import { measureAll } from "./measure.js";
+import { buildAtlas, packLabels } from "./gfx/labels.js";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const qp = new URLSearchParams(location.search);
 
 const S = {
   name: "", structure: null, fields: [], wave: null, fi: 0, st: null,
   iso: 0, p: 0.5, mode: "log", pm: true, surf: true, opacity: 0.85, res: "auto",
   style: "ball", scale: 1, bonds: true, tol: 1.15, ionic: false, cell: true, reps: [1, 1, 1], boundary: true,
-  proj: "persp", theme: "auto",
-  w: { s: 0, k: 0, b: -1, mode: "density", half: "x", cache: new Map() },
+  proj: "persp", theme: "auto", sel: [], mesh: null, labelMode: false, labels: [], atlas: null,
+  w: { s: 0, k: 0, b: -1, mode: "density", half: "x" },
 };
-let viewer = null, model = null, cellShapes = [], isoShapes = [];
-const vols = new Map();
+const cam = new Camera();
+let R = null, canvas = $("gl"), pal = {}, disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
 
-/* ------------------------------------------------------------------ small helpers */
+/* ------------------------------------------------------------------ helpers */
 const unit = v => { const n = norm(v); return v.map(x => x / n); };
 const fmt = x => {
   if (!Number.isFinite(x)) return "–";
   const a = Math.abs(x);
-  return a !== 0 && (a < 1e-2 || a >= 1e4) ? x.toExponential(2).replace("e", "e") : +x.toPrecision(3) + "";
+  return a !== 0 && (a < 1e-2 || a >= 1e4) ? x.toExponential(2) : +x.toPrecision(3) + "";
 };
 const sup = s => s.replace(/e([+-]?)(\d+)/, (m, sg, d) => "×10" + (sg === "-" ? "⁻" : "") + String(+d).replace(/\d/g, c => "⁰¹²³⁴⁵⁶⁷⁸⁹"[c]));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let toastTimer = 0;
 function toast(msg, err = false, ms = 5200) {
   const t = $("toast");
@@ -44,146 +49,201 @@ function toast(msg, err = false, ms = 5200) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 const busy = on => ($("busy").hidden = !on);
-const tick = () => new Promise(r => setTimeout(r, 16));
+const sameCell = (A, B) => A && B && A.every((r, i) => r.every((x, j) => Math.abs(x - B[i][j]) < 2e-3));
+function readPalette() {
+  pal = { bg: hexToRgb01(css("--bg")), pos: hexToRgb01(css("--pos")), neg: hexToRgb01(css("--neg")), cell: hexToRgb01(css("--cell")),
+    accent: hexToRgb01(css("--accent")), ax: ["--ax-a", "--ax-b", "--ax-c"].map(css) };
+}
 
-/* ------------------------------------------------------------------ viewer */
-function ensureViewer() {
-  if (viewer) return true;
-  if (typeof $3Dmol === "undefined") { toast("The 3D library did not load. Check the connection and reload.", true, 9000); return false; }
-  try { viewer = $3Dmol.createViewer($("stage"), { backgroundColor: css("--bg"), antialias: true }); }
-  catch (e) { viewer = null; }
-  if (!viewer) { toast("This browser has WebGL turned off, so the 3D view cannot start.", true, 9000); return false; }
-  viewer.setViewChangeCallback(() => requestAnimationFrame(drawTriad));
+/* ------------------------------------------------------------------ worker */
+let worker = null, reqId = 0;
+const pending = new Map();
+function startWorker() {
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
+  worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
+}
+const call = (op, payload = {}) => new Promise((res, rej) => { const id = ++reqId; pending.set(id, { res, rej }); worker.postMessage({ id, op, ...payload }); });
+
+/* ------------------------------------------------------------------ renderer and frames */
+async function ensureRenderer() {
+  if (R) return true;
+  try { R = globalThis.__isoviewRenderer ? await globalThis.__isoviewRenderer(canvas) : await createRenderer(canvas, m => toast(m, true, 12000), qp.get("gl") || ""); }
+  catch (e) { R = null; toast(e.message || String(e), true, 12000); }
+  if (!R) { toast("This browser has neither WebGPU nor WebGL2, so the 3D view cannot start.", true, 12000); return false; }
+  canvas = R.canvas || canvas;
+  R.onFatal = msg => fallbackToWebGL2(msg);
+  $("gfx").textContent = R.name;
+  readPalette(); R.setBackground(pal.bg);
+  resize();
   return true;
 }
-
-/** 3Dmol VolumeData for a render grid (see the file docstring). */
-function makeVolume(g) {
-  const [va, vb, vc] = g.vox, o = g.origin, f = x => x.toFixed(9);
-  const head = `isoview\nvolume\n0 ${f(o[0])} ${f(o[1])} ${f(o[2])}\n-2 ${f(va[0])} ${f(va[1])} ${f(va[2])}\n` +
-    `-2 ${f(vb[0])} ${f(vb[1])} ${f(vb[2])}\n-2 ${f(vc[0])} ${f(vc[1])} ${f(vc[2])}\n0 0 0 0 0 0 0 0\n`;
-  const vol = new $3Dmol.VolumeData(head, "cube");
-  vol.size = { x: g.size[0], y: g.size[1], z: g.size[2] };
-  vol.data = g.data;
-  vol.inversematrix = null;
-  return vol;
+/** WebGPU reported an error in its first frames: rebuild everything on WebGL2. */
+async function fallbackToWebGL2(msg) {
+  if (!R || R.name !== "WebGPU" || qp.get("gl") === "webgpu") return;
+  R = null;
+  try { R = await createRenderer(canvas, m => toast(m, true, 12000), "webgl2"); } catch (e) { R = null; }
+  if (!R) { toast(`WebGPU failed (${msg}) and WebGL2 is not available.`, true, 12000); return; }
+  canvas = R.canvas; $("gfx").textContent = R.name + " (WebGPU failed)";
+  readPalette(); R.setBackground(pal.bg); resize();
+  buildStructure(); requestSurface(false);
+  toast(`WebGPU reported an error (${msg}); switched to WebGL2.`, true, 9000);
+}
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2), w = window.innerWidth, h = window.innerHeight;
+  canvas.width = Math.max(1, Math.round(w * dpr)); canvas.height = Math.max(1, Math.round(h * dpr));
+  cam.w = w; cam.h = h;
+  requestRender();
+}
+let dirty = false;
+function requestRender() { if (!dirty) { dirty = true; requestAnimationFrame(frame); } }
+function frame() {
+  dirty = false;
+  if (!R) return;
+  const dpr = canvas.width / cam.w;
+  R.draw(packUniforms(cam.view(), cam.proj(R.name === "WebGPU" ? "gpu" : "gl"), [canvas.width, canvas.height, dpr, cam.ortho ? 1 : 0],
+    [0.35, 0.55, 1.0, 0.32], [...pal.accent, 0.33], [...pal.cell, 1.3 * dpr]));
+  drawOverlay(); drawTriad();
 }
 
-function atomStyle(el) {
-  const r = rcov(el), k = S.scale;
-  if (S.style === "space") return { sphere: { radius: r * k } };
-  if (S.style === "stick") return { stick: { radius: 0.14 * k }, sphere: { radius: 0.14 * k } };
-  const s = { sphere: { radius: Math.max(0.2, 0.42 * r) * k } };
-  if (S.bonds) s.stick = { radius: 0.1 * k };
-  return s;
+/* ------------------------------------------------------------------ scene */
+function radiusOf(el) {
+  const k = S.scale;
+  if (S.style === "space") return rcov(el) * k;
+  if (S.style === "stick") return 0.14 * k;
+  return Math.max(0.2, 0.42 * rcov(el)) * k;
 }
-
-function drawStructure() {
-  if (!viewer) return;
-  if (model) { viewer.removeModel(model); model = null; }
-  for (const s of cellShapes) viewer.removeShape(s);
-  cellShapes = [];
+function buildStructure() {
+  if (!R) return;
   const st = S.structure;
-  if (!st) return;
-  const reps = st.pbc ? S.reps : [1, 1, 1];
-  if (S.style !== "off" && st.species.length) {
-    const atoms = displayAtoms(st, { reps, boundary: S.boundary && st.pbc });
-    const bonds = S.bonds && S.style !== "space" ? bondList(atoms, { tol: S.tol, skip: S.ionic ? new Set() : IONIC_CATIONS }) : [];
-    const spec = atoms.map((a, i) => ({ elem: a.el, x: a.x, y: a.y, z: a.z, index: i, serial: i, bonds: [], bondOrder: [], color: colorOf(a.el) }));
-    for (const [i, j] of bonds) { spec[i].bonds.push(j); spec[i].bondOrder.push(1); spec[j].bonds.push(i); spec[j].bondOrder.push(1); }
-    model = viewer.addModel();
-    model.addAtoms(spec);
-    for (const el of new Set(atoms.map(a => a.el))) model.setStyle({ elem: el }, atomStyle(el));
-  }
-  if (S.cell && st.lattice) {
-    const col = css("--cell");
-    const box = (A, B, C, dashed) => {
-      const P = (i, j, k) => ({ x: i * A[0] + j * B[0] + k * C[0], y: i * A[1] + j * B[1] + k * C[1], z: i * A[2] + j * B[2] + k * C[2] });
-      const E = [[0, 0, 0, 1, 0, 0], [0, 1, 0, 1, 1, 0], [0, 0, 1, 1, 0, 1], [0, 1, 1, 1, 1, 1], [0, 0, 0, 0, 1, 0], [1, 0, 0, 1, 1, 0],
-        [0, 0, 1, 0, 1, 1], [1, 0, 1, 1, 1, 1], [0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 1], [0, 1, 0, 0, 1, 1], [1, 1, 0, 1, 1, 1]];
-      for (const e of E) cellShapes.push(viewer.addLine({ start: P(e[0], e[1], e[2]), end: P(e[3], e[4], e[5]), color: col, dashed }));
-    };
-    const L = st.lattice;
-    box(L[0], L[1], L[2], false);
-    if (reps.some(r => r > 1)) box(L[0].map(x => x * reps[0]), L[1].map(x => x * reps[1]), L[2].map(x => x * reps[2]), true);
-  }
-}
-
-function drawSurface(preview = false) {
-  if (!viewer) return;
-  for (const s of isoShapes) viewer.removeShape(s);
-  isoShapes = [];
-  const f = S.fields[S.fi];
-  if (f && S.surf) {
-    const reps = f.periodic && S.structure && S.structure.pbc ? S.reps : [1, 1, 1];
-    const budget = preview ? 1.2e6 : 6e6;
-    let stride = S.res === "auto" ? autoStride(f, reps, budget) : +S.res;
-    if (preview) stride = Math.max(stride, autoStride(f, reps, budget));
-    const key = S.fi + "|" + reps.join("x") + "|" + stride;
-    let vol = vols.get(key);
-    if (!vol) {
-      vol = makeVolume(renderGrid(f, reps, stride));
-      vols.set(key, vol);
-      if (vols.size > 4) vols.delete(vols.keys().next().value);
+  let atoms = [], bonds = [];
+  const segs = [];
+  if (st) {
+    const reps = st.pbc ? S.reps : [1, 1, 1];
+    if (S.style !== "off" && st.species.length) {
+      atoms = displayAtoms(st, { reps, boundary: S.boundary && st.pbc });
+      for (const a of atoms) { a.r = radiusOf(a.el); a.color = colorOf(a.el); }
+      if (S.bonds && S.style !== "space") {
+        const br = (S.style === "stick" ? 0.14 : 0.1) * S.scale;
+        bonds = bondList(atoms, { tol: S.tol, skip: S.ionic ? new Set() : IONIC_CATIONS }).map(([i, j]) => {
+          const a = atoms[i], b = atoms[j];
+          return { p0: [a.x, a.y, a.z], p1: [b.x, b.y, b.z], c0: a.color, c1: b.color, r: br };
+        });
+      }
     }
-    const spec = c => ({ color: c, opacity: S.opacity, smoothness: 1 });
-    isoShapes.push(viewer.addIsosurface(vol, { isoval: S.iso, ...spec(css("--pos")) }));
-    if (S.mode === "log" && S.pm && f.kind === "signed" && S.st.min < -1e-6 * S.st.maxAbs) isoShapes.push(viewer.addIsosurface(vol, { isoval: -S.iso, ...spec(css("--neg")) }));
+    if (S.cell && st.lattice) {
+      const L = st.lattice;
+      const box = (A, B, C, dashed) => {
+        const P = (i, j, k) => [0, 1, 2].map(c => i * A[c] + j * B[c] + k * C[c]);
+        const E = [[0, 0, 0, 1, 0, 0], [0, 1, 0, 1, 1, 0], [0, 0, 1, 1, 0, 1], [0, 1, 1, 1, 1, 1], [0, 0, 0, 0, 1, 0], [1, 0, 0, 1, 1, 0],
+          [0, 0, 1, 0, 1, 1], [1, 0, 1, 1, 1, 1], [0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 1], [0, 1, 0, 0, 1, 1], [1, 1, 0, 1, 1, 1]];
+        for (const e of E) segs.push({ p0: P(e[0], e[1], e[2]), p1: P(e[3], e[4], e[5]), dashed });
+      };
+      box(L[0], L[1], L[2], false);
+      if (reps.some(r => r > 1)) box(L[0].map(x => x * reps[0]), L[1].map(x => x * reps[1]), L[2].map(x => x * reps[2]), true);
+    }
   }
-  viewer.render();
+  // keep selected and labelled atoms that are still drawn (same structure atom at the same place)
+  const remap = list => list.map(s => {
+    const i = atoms.findIndex(a => a.src === s.src && Math.abs(a.x - s.p[0]) + Math.abs(a.y - s.p[1]) + Math.abs(a.z - s.p[2]) < 1e-3);
+    return i < 0 ? null : { ...s, i };
+  }).filter(Boolean);
+  S.sel = remap(S.sel); S.labels = remap(S.labels);
+  disp = { atoms, centers: Float32Array.from(atoms.flatMap(a => [a.x, a.y, a.z])), radii: Float32Array.from(atoms.map(a => a.r)) };
+  uploadAtoms(); uploadLabels();
+  R.setBonds(packBonds(bonds), bonds.length);
+  R.setLines(packLines(segs), segs.length);
+  updateMeasure();
+  requestRender();
+}
+function uploadLabels() {
+  if (!R.setLabels) return;
+  const list = S.labels.map(s => { const a = disp.atoms[s.i]; return { x: a.x, y: a.y, z: a.z, r: Math.max(a.r, 0.36), text: a.el, color: a.color }; });
+  R.setLabels(packLabels(list, S.atlas ? S.atlas.map : {}), list.length, S.atlas);
+  labelBar();
+}
+function setLabelMode(on) {
+  S.labelMode = on;
+  if (on) clearSelection();
+  $("btn-label").setAttribute("aria-pressed", String(on));
+  $("stage").classList.toggle("labelling", on);
+  labelBar();
+}
+function labelBar() {
+  const bar = $("labelbar");
+  bar.hidden = !S.labelMode;
+  if (S.labelMode) $("label-count").textContent = S.labels.length ? `${S.labels.length} labelled` : "Click atoms to label them";
+}
+function uploadAtoms() {
+  const sel = new Set(S.sel.map(s => s.i));
+  disp.atoms.forEach((a, i) => (a.sel = sel.has(i)));
+  R.setAtoms(packAtoms(disp.atoms), disp.atoms.length);
 }
 
-let rafSurf = 0;
-function surfaceSoon(preview) {
-  cancelAnimationFrame(rafSurf);
-  rafSurf = requestAnimationFrame(() => { drawSurface(preview); summaries(); });
+/* surfaces: one request at a time; the newest pending request runs when the current one returns */
+let meshBusy = false, meshNext = null;
+function requestSurface(preview = false) { meshNext = { preview }; if (!meshBusy) runSurface(); }
+async function runSurface() {
+  const p = meshNext;
+  meshNext = null;
+  if (!p || !R) return;
+  const f = S.fields[S.fi];
+  if (!f || !S.surf) { R.setMeshes([]); S.mesh = null; levelHint(); summaries(); requestRender(); return; }
+  meshBusy = true;
+  try {
+    const reps = f.periodic && S.structure && S.structure.pbc ? S.reps : [1, 1, 1];
+    const budget = p.preview ? 1.5e6 : 8e6, auto = autoStride(f, reps, budget);
+    const stride = S.res === "auto" ? auto : Math.max(+S.res, p.preview ? auto : 1);
+    const signed = S.mode === "log" && f.kind === "signed" && S.pm && f.stats.min < -1e-6 * f.stats.maxAbs;
+    const { meshes } = await call("mesh", { fi: S.fi, reps, stride, isos: signed ? [S.iso, -S.iso] : [S.iso] });
+    R.setMeshes(meshes.map((m, i) => ({ ...m, color: i ? pal.neg : pal.pos, opacity: S.opacity })));
+    S.mesh = { tris: meshes.reduce((a, m) => a + m.triangles, 0), stride, truncated: meshes.some(m => m.truncated), n: meshes.length };
+    levelHint(); summaries(); requestRender();
+  } catch (e) { toast(e.message || String(e), true); }
+  finally { meshBusy = false; }
+  if (meshNext) runSurface();
+}
+function recolorMeshes() {
+  if (!R || !S.mesh) return;
+  R.setMeshColors([...Array(S.mesh.n)].map((_, i) => ({ color: i ? pal.neg : pal.pos, opacity: S.opacity })));
+  requestRender();
 }
 
-/* ------------------------------------------------------------------ orientation */
-function quatFromRows(R) {
-  const [m11, m12, m13] = R[0], [m21, m22, m23] = R[1], [m31, m32, m33] = R[2], tr = m11 + m22 + m33;
-  let x, y, z, w, s;
-  if (tr > 0) { s = 0.5 / Math.sqrt(tr + 1); w = 0.25 / s; x = (m32 - m23) * s; y = (m13 - m31) * s; z = (m21 - m12) * s; }
-  else if (m11 > m22 && m11 > m33) { s = 2 * Math.sqrt(1 + m11 - m22 - m33); w = (m32 - m23) / s; x = 0.25 * s; y = (m12 + m21) / s; z = (m13 + m31) / s; }
-  else if (m22 > m33) { s = 2 * Math.sqrt(1 + m22 - m11 - m33); w = (m13 - m31) / s; x = (m12 + m21) / s; y = 0.25 * s; z = (m23 + m32) / s; }
-  else { s = 2 * Math.sqrt(1 + m33 - m11 - m22); w = (m21 - m12) / s; x = (m13 + m31) / s; y = (m23 + m32) / s; z = 0.25 * s; }
-  return [x, y, z, w];
+/* ------------------------------------------------------------------ camera, views, triad */
+function sceneSphere() {
+  const st = S.structure, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const add = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
+  for (const a of disp.atoms) add([a.x, a.y, a.z]);
+  if (st && st.lattice && (S.cell || !disp.atoms.length)) {
+    const L = st.lattice, r = st.pbc ? S.reps : [1, 1, 1];
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) add([0, 1, 2].map(c => i * r[0] * L[0][c] + j * r[1] * L[1][c] + k * r[2] * L[2][c]));
+  }
+  if (!Number.isFinite(lo[0])) return { c: [0, 0, 0], r: 5 };
+  return { c: lo.map((v, i) => (v + hi[i]) / 2), r: Math.max(1, 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])) };
 }
-/** Rotation rows for a view with `toward` pointing at the viewer and `up` (orthogonalised) pointing up. */
 function rows(toward, up) {
   const t = unit(toward), u0 = up.map((x, i) => x - dot(up, t) * t[i]);
-  const u = norm(u0) > 1e-6 ? unit(u0) : unit(cross(t, [1, 0, 0]));
+  const u = norm(u0) > 1e-6 ? unit(u0) : unit(cross(t, Math.abs(t[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
   return [cross(u, t), u, t];
 }
-function setRotation(R) {
-  const q = quatFromRows(R), v = viewer.getView();
-  v[4] = q[0]; v[5] = q[1]; v[6] = q[2]; v[7] = q[3];
-  viewer.setView(v);
-}
+function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); }
 function viewAlong(i) {
   const L = S.structure && S.structure.lattice;
-  if (!viewer || !L) return;
-  setRotation(rows(L[i], L[(i + 2) % 3]));
-  viewer.zoomTo(); viewer.render(); drawTriad();
+  if (!L) return;
+  cam.q = qfromRows(rows(L[i], L[(i + 2) % 3])); fit(); requestRender();
 }
 function resetView() {
-  if (!viewer) return;
   const L = S.structure && S.structure.lattice;
-  if (L) {
-    const a = unit(L[0]), b = unit(L[1]), c = unit(L[2]);
-    setRotation(rows([0, 1, 2].map(i => a[i] + 0.36 * b[i] + 0.3 * c[i]), c));
-  }
-  viewer.zoomTo(); viewer.zoom(0.92); viewer.render(); drawTriad();
+  if (L) { const a = unit(L[0]), b = unit(L[1]), c = unit(L[2]); cam.q = qfromRows(rows([0, 1, 2].map(i => a[i] + 0.36 * b[i] + 0.3 * c[i]), c)); }
+  else cam.q = [0, 0, 0, 1];
+  fit(); requestRender();
 }
 function drawTriad() {
   const svg = $("triad"), L = S.structure && S.structure.lattice;
-  if (!viewer || !L) { svg.innerHTML = ""; return; }
-  const v = viewer.getView(), [qx, qy, qz, qw] = [v[4], v[5], v[6], v[7]];
-  const rot = p => { // standard active rotation by unit quaternion q (matches 3Dmol's group matrix)
-    const tx = 2 * (qy * p[2] - qz * p[1]), ty = 2 * (qz * p[0] - qx * p[2]), tz = 2 * (qx * p[1] - qy * p[0]);
-    return [p[0] + qw * tx + (qy * tz - qz * ty), p[1] + qw * ty + (qz * tx - qx * tz), p[2] + qw * tz + (qx * ty - qy * tx)];
-  };
-  const ax = L.map((a, i) => ({ r: rot(unit(a)), n: "abc"[i], c: css(["--ax-a", "--ax-b", "--ax-c"][i]) })).sort((p, q) => p.r[2] - q.r[2]);
+  if (!L) { svg.innerHTML = ""; return; }
+  const M = qmat(cam.q);
+  const ax = L.map((a, i) => { const u = unit(a); return { r: [0, 1, 2].map(k => M[k][0] * u[0] + M[k][1] * u[1] + M[k][2] * u[2]), n: "abc"[i], c: pal.ax[i] }; })
+    .sort((p, q) => p.r[2] - q.r[2]);
   svg.innerHTML = ax.map(({ r, n, c }) => {
     const x = 22 * r[0], y = -22 * r[1], o = 0.45 + 0.55 * (r[2] + 1) / 2;
     return `<g opacity="${o.toFixed(2)}"><line x1="0" y1="0" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${c}" stroke-width="2" stroke-linecap="round"/>` +
@@ -191,12 +251,103 @@ function drawTriad() {
   }).join("");
 }
 
+/* ------------------------------------------------------------------ picking and measurement */
+const atomLabel = s => `${s.el}${s.src + 1}`;
+function clickAt(x, y) {
+  const i = disp.atoms.length ? pickSphere(cam.ray(x, y), disp.centers, disp.radii) : -1;
+  if (S.labelMode) {
+    if (i < 0) return;
+    const k = S.labels.findIndex(s => s.i === i), a = disp.atoms[i];
+    if (k >= 0) S.labels.splice(k, 1); else S.labels.push({ i, src: a.src, el: a.el, p: [a.x, a.y, a.z] });
+    uploadLabels(); requestRender();
+    return;
+  }
+  if (i < 0) return clearSelection();
+  const k = S.sel.findIndex(s => s.i === i);
+  if (k >= 0) S.sel.splice(k, 1);
+  else {
+    if (S.sel.length >= 4) S.sel = [];
+    const a = disp.atoms[i];
+    S.sel.push({ i, src: a.src, el: a.el, p: [a.x, a.y, a.z] });
+  }
+  uploadAtoms(); updateMeasure(); requestRender();
+}
+function clearSelection() {
+  if (!S.sel.length) return;
+  S.sel = []; uploadAtoms(); updateMeasure(); requestRender();
+}
+function updateMeasure() {
+  const box = $("measure");
+  if (!S.sel.length) { box.hidden = true; box.innerHTML = ""; return; }
+  const m = measureAll(S.sel.map(s => s.p)), parts = [];
+  if (S.sel.length === 1) parts.push(`<span class="mv">${S.sel[0].p.map(v => v.toFixed(3)).join("  ")} Å</span>`);
+  m.bonds.forEach((d, i) => parts.push(`<span class="mk">${esc(atomLabel(S.sel[i]))}–${esc(atomLabel(S.sel[i + 1]))}</span><span class="mv">${d.toFixed(3)} Å</span>`));
+  m.angles.forEach((a, i) => parts.push(`<span class="mk">∠${esc(atomLabel(S.sel[i + 1]))}</span><span class="mv">${a.toFixed(2)}°</span>`));
+  if (m.dihedral !== null) parts.push(`<span class="mk">dihedral</span><span class="mv">${m.dihedral.toFixed(2)}°</span>`);
+  box.innerHTML = `<span class="atoms">${S.sel.map(s => esc(atomLabel(s))).join(" · ")}</span>${parts.join("")}` +
+    `<button type="button" class="x" id="sel-clear" aria-label="Clear the selection">×</button>`;
+  box.hidden = false;
+  $("sel-clear").addEventListener("click", clearSelection);
+}
+function drawOverlay() {
+  const ov = $("ov");
+  if (!S.sel.length) { if (ov.firstChild) ov.innerHTML = ""; return; }
+  const P = S.sel.map(s => cam.project(s.p));
+  if (P.some(p => !p)) { ov.innerHTML = ""; return; }
+  const m = measureAll(S.sel.map(s => s.p));
+  const tag = (x, y, t) => { const w = 7 * t.length + 12; return `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})"><rect x="${-w / 2}" y="-10" width="${w}" height="19" rx="6"/><text y="4" text-anchor="middle">${esc(t)}</text></g>`; };
+  let h = "";
+  for (let i = 0; i + 1 < P.length; i++) h += `<line class="ml" x1="${P[i].x.toFixed(1)}" y1="${P[i].y.toFixed(1)}" x2="${P[i + 1].x.toFixed(1)}" y2="${P[i + 1].y.toFixed(1)}"/>`;
+  m.bonds.forEach((d, i) => { h += tag((P[i].x + P[i + 1].x) / 2, (P[i].y + P[i + 1].y) / 2 - 12, d.toFixed(3) + " Å"); });
+  m.angles.forEach((a, i) => { h += tag(P[i + 1].x, P[i + 1].y + 22, a.toFixed(1) + "°"); });
+  if (m.dihedral !== null) h += tag((P[1].x + P[2].x) / 2, (P[1].y + P[2].y) / 2 + 22, "φ " + m.dihedral.toFixed(1) + "°");
+  ov.innerHTML = h;
+}
+
+/* pointer: drag rotates (right button, shift or ctrl pans), wheel and pinch zoom, a click without motion picks */
+const stage = $("stage"), ptrs = new Map();
+let drag = null;
+stage.addEventListener("pointerdown", e => {
+  if (!R || !S.structure) return;
+  if (stage.setPointerCapture) stage.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 1) drag = { x0: e.clientX, y0: e.clientY, moved: false, pan: e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey, button: e.button };
+  else if (drag) drag.moved = true;
+});
+stage.addEventListener("pointermove", e => {
+  const prev = ptrs.get(e.pointerId);
+  if (!prev || !drag) return;
+  const cur = { x: e.clientX, y: e.clientY };
+  if (ptrs.size === 2) {
+    const other = [...ptrs.entries()].find(([id]) => id !== e.pointerId)[1];
+    const d0 = Math.hypot(prev.x - other.x, prev.y - other.y), d1 = Math.hypot(cur.x - other.x, cur.y - other.y);
+    if (d0 > 0 && d1 > 0) cam.zoomBy(d0 / d1);
+    cam.panBy((cur.x - prev.x) / 2, (cur.y - prev.y) / 2);
+  } else {
+    if (!drag.moved && Math.hypot(cur.x - drag.x0, cur.y - drag.y0) > 4) drag.moved = true;
+    if (drag.moved) { if (drag.pan) cam.panBy(cur.x - prev.x, cur.y - prev.y); else cam.rotateBy(cur.x - prev.x, cur.y - prev.y); }
+  }
+  ptrs.set(e.pointerId, cur);
+  if (drag.moved) requestRender();
+});
+const endPtr = e => {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if (drag && !drag.moved && ptrs.size === 0 && e.type === "pointerup" && drag.button === 0) clickAt(e.clientX, e.clientY);
+  if (ptrs.size === 0) drag = null;
+};
+stage.addEventListener("pointerup", endPtr);
+stage.addEventListener("pointercancel", endPtr);
+stage.addEventListener("wheel", e => { if (!R) return; e.preventDefault(); cam.zoomBy(Math.exp(e.deltaY * (e.deltaMode ? 0.05 : 0.0015))); requestRender(); }, { passive: false });
+stage.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("resize", () => { if (R) resize(); });
+
 /* ------------------------------------------------------------------ fields and levels */
 function selectField(i, keepP = true) {
   S.fi = i;
   const f = S.fields[i];
   if (!f) { S.st = null; return; }
-  S.st = stats(f);
+  S.st = f.stats;
   S.mode = f.kind === "linear" ? "linear" : "log";
   // WHY: a total density (many electrons) at 50% enclosed hugs the cores; 90% gives the usual bonding-scale level
   if (!keepP) S.p = S.st.integral > 3 ? 0.9 : 0.5;
@@ -206,8 +357,8 @@ function selectField(i, keepP = true) {
 }
 function logRange() { const hi = Math.log10(S.st.maxAbs) - 1e-3; return [hi - 6, hi]; }
 function syncLevel() {
-  const f = S.fields[S.fi], sl = $("iso");
-  if (!f) return;
+  if (!S.fields[S.fi]) return;
+  const sl = $("iso");
   if (S.mode === "log") { const [lo, hi] = logRange(); sl.value = Math.round(1000 * (Math.log10(Math.max(S.iso, 1e-300)) - lo) / (hi - lo)); }
   else sl.value = Math.round(1000 * (S.iso - S.st.min) / ((S.st.max - S.st.min) || 1));
   $("iso-num").value = fmt(S.iso);
@@ -216,50 +367,39 @@ function syncLevel() {
 function levelHint() {
   const f = S.fields[S.fi];
   if (!f) return;
-  const u = f.unit ? " " + f.unit : "";
-  if (S.mode === "log") {
-    const p = fractionAbove(S.st, S.iso), signed = f.kind === "signed";
-    $("iso-hint").textContent = `±${sup(fmt(S.iso))}${u} · encloses ${Math.round(100 * p)}% of ${signed ? "∫|f|" : "the total"}`.replace(/^±/, signed ? "±" : "");
-  } else $("iso-hint").textContent = `${sup(fmt(S.iso))}${u}`;
-  $("row-pm").hidden = !(S.mode === "log" && f.kind === "signed" && S.st.min < -1e-6 * S.st.maxAbs);
+  const u = f.unit ? " " + f.unit : "", signed = f.kind === "signed";
+  if (S.mode === "log") $("iso-hint").textContent = `${signed ? "±" : ""}${sup(fmt(S.iso))}${u} · encloses ${Math.round(100 * fractionAbove(S.st, S.iso))}% of ${signed ? "∫|f|" : "the total"}`;
+  else $("iso-hint").textContent = `${sup(fmt(S.iso))}${u}`;
+  $("row-pm").hidden = !(S.mode === "log" && signed && S.st.min < -1e-6 * S.st.maxAbs);
   const I = S.st.integral, fi = Math.abs(I) >= 100 ? I.toFixed(2) : +I.toPrecision(5) + "";
-  $("stats").textContent = `${f.n.join(" × ")} grid · min ${fmt(S.st.min)} · max ${fmt(S.st.max)} · ∫ ${fi}${f.unit === "e/Å³" ? " e" : ""}`;
+  const m = S.mesh, ord = n => n + (["th", "st", "nd", "rd"][n] || "th");
+  const tri = m ? ` · ${m.tris >= 1e6 ? (m.tris / 1e6).toFixed(2) + "M" : Math.round(m.tris / 1e3) + "k"} triangles${m.stride > 1 ? ` (every ${ord(m.stride)} point)` : ""}${m.truncated ? ", truncated" : ""}` : "";
+  $("stats").textContent = `${f.n.join(" × ")} grid · min ${fmt(S.st.min)} · max ${fmt(S.st.max)} · ∫ ${fi}${f.unit === "e/Å³" ? " e" : ""}${tri}`;
 }
 function setLevelFromSlider(preview) {
   const u = +$("iso").value / 1000;
   if (S.mode === "log") { const [lo, hi] = logRange(); S.iso = Math.pow(10, lo + u * (hi - lo)); S.p = fractionAbove(S.st, S.iso); }
   else S.iso = S.st.min + u * (S.st.max - S.st.min);
   $("iso-num").value = fmt(S.iso);
-  levelHint();
-  surfaceSoon(preview);
+  levelHint(); summaries();
+  requestSurface(preview);
 }
 
 /* ------------------------------------------------------------------ WAVECAR */
 async function showBand(b) {
   const w = S.wave, { s, k, mode, half } = S.w;
   S.w.b = b;
-  const key = [s, k, b, mode, half].join("|");
-  let f = S.w.cache.get(key);
-  if (!f) {
-    busy(true); await tick();
-    try {
-      const r = await w.orbital(s, k, b, { signed: mode === "psi", half });
-      f = { name: `band ${b + 1}${w.nspin === 2 ? (s ? " ↓" : " ↑") : ""}${mode === "psi" ? " ψ" : " |ψ|²"}`, unit: mode === "psi" ? "Å⁻³ᐟ²" : "Å⁻³",
-        n: r.n, data: r.data, origin: [0, 0, 0], span: w.lattice, periodic: true, closed: false, kind: r.signed ? "signed" : "density" };
-      S.w.cache.set(key, f);
-      if (S.w.cache.size > 6) S.w.cache.delete(S.w.cache.keys().next().value);
-    } catch (e) { toast(e.message, true); console.error(e); return; }
-    finally { busy(false); }
-  }
-  S.fields = [f]; vols.clear();
-  selectField(0, true);
-  fillFieldSelect();
-  markBand();
-  drawSurface(); summaries();
+  busy(true);
+  try {
+    const { field } = await call("orbital", { s, k, b, signed: mode === "psi" && w.type === "gam", half });
+    S.fields = [field];
+    selectField(0, true); fillFieldSelect(); markBand(); summaries();
+    requestSurface(false);
+  } catch (e) { toast(e.message || String(e), true); }
+  finally { busy(false); }
 }
 function buildBands() {
-  const w = S.wave, { s, k } = S.w, e = w.eig[s][k], o = w.occ[s][k], fr = w.frontier(s, k), list = $("bands");
-  const rows = [];
+  const w = S.wave, { s, k } = S.w, e = w.eig[s][k], o = w.occ[s][k], fr = w.frontier[s][k], list = $("bands"), rows = [];
   for (let b = 0; b < w.nb; b++) {
     const cls = ["band", o[b] > 0.5 ? "occ" : "", b === fr.homo ? "homo" : "", b === fr.lumo ? "lumo" : ""].join(" ");
     rows.push(`<div class="${cls}" role="option" data-b="${b}" aria-selected="false"><span>${b + 1}</span><span class="e">${e[b].toFixed(3)}</span><span class="o">${o[b].toFixed(2)}</span></div>`);
@@ -274,66 +414,58 @@ function markBand() {
   if (el) el.setAttribute("aria-selected", "true");
 }
 
-/* ------------------------------------------------------------------ loading */
-const sameCell = (A, B) => A && B && A.every((r, i) => r.every((x, j) => Math.abs(x - B[i][j]) < 2e-3));
-
+/* ------------------------------------------------------------------ loading and chrome */
 async function openFiles(list) {
   const files = [...list];
   if (!files.length) return;
-  busy(true); await tick();
+  busy(true);
   try {
-    let structure = null, fields = [], wave = null, notes = [], title = "";
-    for (const f of files) {
-      const head = await f.slice(0, 65536).arrayBuffer();
-      if (isWavecarHeader(head)) { wave = await Wavecar.open((o, l) => f.slice(o, o + l).arrayBuffer()); continue; }
-      const text = await f.text();
-      const d = parseText(detectKind(f.name, text.slice(0, 65536)), text, f.name);
-      notes.push(...d.notes); title = title || d.title;
-      if (d.fields.length && !fields.length) { fields = d.fields; if (!structure || !structure.species.length) structure = d.structure; }
-      else if (!structure || (!structure.species.length && d.structure.species.length)) structure = d.structure;
+    if (!(await ensureRenderer())) return;
+    const attach = !!(S.wave && S.structure && !S.structure.species.length);
+    const d = await call("open", { files, attach });
+    if (d.attach) {
+      if (d.structure && sameCell(d.structure.lattice, S.wave.lattice)) {
+        S.structure = d.structure; S.atlas = buildAtlas([...new Set(S.structure.species)]);
+        buildStructure(); updateChrome(); toast("Atoms added to the WAVECAR cell.");
+      }
+      else toast("That structure's cell differs from the WAVECAR's, so it was not added.", true);
+      return;
     }
-    if (!wave && !fields.length && structure && S.wave && S.structure && !S.structure.species.length) {
-      if (sameCell(structure.lattice, S.wave.lattice)) { S.structure = structure; drawStructure(); viewer.render(); updateChrome(); toast("Atoms added to the WAVECAR cell."); return; }
-    }
-    if (wave && !(structure && sameCell(structure.lattice, wave.lattice))) {
-      if (structure) notes.push("the structure's cell differs from the WAVECAR's, so only the cell is drawn");
-      else notes.push("add the matching POSCAR or CONTCAR to draw the atoms");
-      structure = { lattice: wave.lattice, pbc: true, species: [], pos: new Float64Array(0) };
-    }
-    load({ name: files.map(f => f.name).join(" + "), title, structure, fields, wave, notes });
+    await load({ name: files.map(f => f.name).join(" + "), ...d });
   } catch (e) { toast(e.message || String(e), true, 8000); console.error(e); }
   finally { busy(false); }
 }
-
-function load(d) {
-  if (!ensureViewer()) return;
-  Object.assign(S, { name: d.name, structure: d.structure, fields: d.fields || [], wave: d.wave || null });
-  S.w = { s: 0, k: 0, b: -1, mode: "density", half: "x", cache: new Map() };
+async function load(d) {
+  if (!(await ensureRenderer())) return;
+  Object.assign(S, { name: d.name, structure: d.structure, fields: d.fields || [], wave: d.wave || null, sel: [], labels: [], mesh: null, fi: 0 });
+  S.atlas = S.structure && S.structure.species.length ? buildAtlas([...new Set(S.structure.species)]) : null;
+  setLabelMode(false);
+  S.w = { s: 0, k: 0, b: -1, mode: "density", half: "x" };
+  S.p = 0.5;
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
-  vols.clear();
+  const notes = [...(d.notes || [])];
+  if (S.wave && !(S.structure && sameCell(S.structure.lattice, S.wave.lattice))) {
+    notes.push(S.structure ? "the structure's cell differs from the WAVECAR's, so only the cell is drawn" : "add the matching POSCAR or CONTCAR to draw the atoms");
+    S.structure = { lattice: S.wave.lattice, pbc: true, species: [], pos: new Float64Array(0) };
+  }
+  R.setMeshes([]);
   $("empty").hidden = true;
   if (S.wave) {
-    const w = S.wave;
-    $("kpt").innerHTML = w.kpts.map((k, i) => `<option value="${i}">${i + 1}: ${k.map(x => x.toFixed(3)).join(" ")}</option>`).join("");
+    $("kpt").innerHTML = S.wave.kpts.map((k, i) => `<option value="${i}">${i + 1}: ${k.map(x => x.toFixed(3)).join(" ")}</option>`).join("");
     buildBands();
   }
-  S.fi = 0;
   if (S.fields.length) selectField(0, false);
-  fillFieldSelect();
-  updateChrome();
-  drawStructure(); drawSurface();
-  resetView();
-  if (S.wave) { const fr = S.wave.frontier(0, 0); showBand(Math.max(0, fr.homo)); $("sec-orbital").open = true; }
-  else if (S.fields.length) $("sec-surface").open = true;
-  if (d.notes && d.notes.length) toast(d.notes.join("; "), false, 7000);
+  fillFieldSelect(); updateChrome(); buildStructure(); resetView();
+  for (const id of ["sec-structure", "sec-surface", "sec-orbital", "sec-view"]) $(id).open = false;
+  if (S.wave) { $("sec-orbital").open = true; await showBand(Math.max(0, S.wave.frontier[0][0].homo)); }
+  else if (S.fields.length) { $("sec-surface").open = true; requestSurface(false); }
+  if (notes.length) toast(notes.join("; "), false, 7000);
 }
-
 function fillFieldSelect() {
-  $("field").innerHTML = S.fields.map((f, i) => `<option value="${i}">${f.name}</option>`).join("");
+  $("field").innerHTML = S.fields.map((f, i) => `<option value="${i}">${esc(f.name)}</option>`).join("");
   $("field").value = S.fi;
   $("row-field").hidden = S.fields.length < 2;
 }
-
 function updateChrome() {
   const st = S.structure, has = !!st;
   $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has;
@@ -356,10 +488,8 @@ function updateChrome() {
     }
   }
   $("info").textContent = info;
-  summaries();
-  segState();
+  summaries(); segState();
 }
-
 function summaries() {
   const st = S.structure;
   $("sum-structure").textContent = !st ? "" : S.style === "off" ? "hidden" : `${S.style}${st.pbc ? " · " + S.reps.join("×") : ""}`;
@@ -368,41 +498,54 @@ function summaries() {
   if (S.wave && S.w.b >= 0) $("sum-orbital").textContent = `${S.w.b + 1}${S.wave.nspin === 2 ? (S.w.s ? "↓" : "↑") : ""} · ${S.wave.eig[S.w.s][S.w.k][S.w.b].toFixed(2)} eV`;
   $("sum-view").textContent = S.proj === "ortho" ? "ortho" : "perspective";
 }
-
 function segState() {
   const val = { style: S.style, res: S.res, wspin: String(S.w.s), wmode: S.w.mode, half: S.w.half, proj: S.proj, theme: S.theme };
   for (const seg of document.querySelectorAll(".seg")) for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === val[seg.dataset.key]));
 }
 
-/* ------------------------------------------------------------------ examples */
-function hydrogen3d() {
-  // psi_3d(x2-y2) = (x^2 - y^2) exp(-r / 3 a0) / (81 sqrt(2 pi) a0^(7/2)), normalised over all space (A^-3/2)
-  const n = 72, L = 26, h = L / (n - 1), a0 = 0.529177210903, c = 1 / (81 * Math.sqrt(2 * Math.PI) * Math.pow(a0, 3.5));
-  const data = new Float32Array(n * n * n);
-  for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const x = -L / 2 + i * h, y = -L / 2 + j * h, z = -L / 2 + k * h, r = Math.hypot(x, y, z);
-    data[i + n * (j + n * k)] = c * (x * x - y * y) * Math.exp(-r / (3 * a0));
-  }
-  const box = [[L, 0, 0], [0, L, 0], [0, 0, L]];
-  return { name: "hydrogen 3d(x²−y²), computed here", structure: { lattice: box, pbc: false, species: ["H"], pos: Float64Array.from([0, 0, 0]) },
-    fields: [{ name: "ψ 3d(x²−y²)", unit: "Å⁻³ᐟ²", n: [n, n, n], data, origin: [-L / 2, -L / 2, -L / 2], span: box, periodic: false, closed: false, kind: "signed" }], notes: [] };
+/* ------------------------------------------------------------------ home page, examples, image */
+function showHome() {
+  $("empty").hidden = false;
+  const back = $("btn-back");
+  back.hidden = !S.structure;
+  if (S.structure) back.textContent = `Back to ${S.name}`;
 }
 async function example(id) {
-  if (id === "h3d") return load(hydrogen3d());
-  const url = { rutile: "examples/rutile-TiO2.cif", graphene: "examples/graphene.pw.in" }[id];
-  const r = await fetch(url);
-  if (!r.ok) return toast(`Could not load the example (${r.status}).`, true);
-  openFiles([new File([await r.blob()], url.split("/").pop())]);
+  busy(true);
+  try {
+    if (id === "h3d") {
+      if (!(await ensureRenderer())) return;
+      await load({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })) });
+      return;
+    }
+    const url = { rutile: "examples/rutile-TiO2.cif", graphene: "examples/graphene.pw.in" }[id];
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Could not load the example (${r.status}).`);
+    await openFiles([new File([await r.blob()], url.split("/").pop())]);
+  } catch (e) { toast(e.message || String(e), true); }
+  finally { busy(false); }
 }
+function snapshot() {
+  if (!R) return;
+  frame();
+  canvas.toBlob(b => {
+    if (!b) return toast("Could not capture the image.", true);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = (S.name.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png";
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, "image/png");
+}
+function restyle() { if (!R) return; readPalette(); R.setBackground(pal.bg); recolorMeshes(); requestRender(); }
 
 /* ------------------------------------------------------------------ wiring */
 function bindSeg(key, fn) {
-  const seg = document.querySelector(`.seg[data-key="${key}"]`);
-  seg.addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
+  document.querySelector(`.seg[data-key="${key}"]`).addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
 }
-bindSeg("style", v => { S.style = v; drawStructure(); viewer.render(); });
-bindSeg("res", v => { S.res = v; drawSurface(); });
-bindSeg("proj", v => { S.proj = v; viewer && (viewer.setProjection(v === "ortho" ? "orthographic" : "perspective"), viewer.render()); });
+bindSeg("style", v => { S.style = v; buildStructure(); });
+bindSeg("res", v => { S.res = v; requestSurface(false); });
+bindSeg("proj", v => { S.proj = v; cam.ortho = v === "ortho"; requestRender(); });
 bindSeg("theme", v => {
   S.theme = v;
   if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v);
@@ -411,7 +554,7 @@ bindSeg("theme", v => {
 });
 bindSeg("wspin", v => { S.w.s = +v; buildBands(); showBand(Math.max(0, S.w.b)); });
 bindSeg("wmode", v => { S.w.mode = v; showBand(Math.max(0, S.w.b)); });
-bindSeg("half", v => { S.w.half = v; S.w.cache.clear(); showBand(Math.max(0, S.w.b)); });
+bindSeg("half", v => { S.w.half = v; showBand(Math.max(0, S.w.b)); });
 $("kpt").addEventListener("change", e => { S.w.k = +e.target.value; buildBands(); showBand(Math.max(0, S.w.b)); });
 $("bands").addEventListener("click", e => { const r = e.target.closest(".band"); if (r) showBand(+r.dataset.b); });
 $("bands").addEventListener("keydown", e => {
@@ -421,78 +564,75 @@ $("bands").addEventListener("keydown", e => {
   showBand(b);
   const el = $("bands").querySelector(`[data-b="${b}"]`); if (el) el.scrollIntoView({ block: "nearest" });
 });
-
-$("scale").addEventListener("input", e => { S.scale = +e.target.value; drawStructure(); viewer.render(); });
-$("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = $("row-ionic").hidden = !S.bonds; drawStructure(); viewer.render(); });
-$("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").textContent = S.tol.toFixed(2); drawStructure(); viewer.render(); });
-$("ionic").addEventListener("change", e => { S.ionic = e.target.checked; drawStructure(); viewer.render(); });
-$("cell").addEventListener("change", e => { S.cell = e.target.checked; drawStructure(); viewer.render(); });
-$("boundary").addEventListener("change", e => { S.boundary = e.target.checked; drawStructure(); viewer.render(); });
+$("scale").addEventListener("input", e => { S.scale = +e.target.value; buildStructure(); });
+$("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = $("row-ionic").hidden = !S.bonds; buildStructure(); });
+$("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").textContent = S.tol.toFixed(2); buildStructure(); });
+$("ionic").addEventListener("change", e => { S.ionic = e.target.checked; buildStructure(); });
+$("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStructure(); });
+$("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
   S.reps[i] = Math.min(6, Math.max(1, Math.round(+e.target.value) || 1)); e.target.value = S.reps[i];
-  drawStructure(); drawSurface(); viewer.zoomTo(); viewer.render(); summaries();
+  buildStructure(); fit(); requestSurface(false); summaries();
 });
-$("field").addEventListener("change", e => { selectField(+e.target.value, true); drawSurface(); summaries(); });
-$("surf").addEventListener("change", e => { S.surf = e.target.checked; drawSurface(); summaries(); });
-$("pm").addEventListener("change", e => { S.pm = e.target.checked; drawSurface(); });
-$("opacity").addEventListener("input", e => { S.opacity = +e.target.value; surfaceSoon(false); });
+$("field").addEventListener("change", e => { selectField(+e.target.value, true); requestSurface(false); summaries(); });
+$("surf").addEventListener("change", e => { S.surf = e.target.checked; requestSurface(false); summaries(); });
+$("pm").addEventListener("change", e => { S.pm = e.target.checked; requestSurface(false); });
+$("opacity").addEventListener("input", e => { S.opacity = +e.target.value; recolorMeshes(); });
 $("iso").addEventListener("input", () => setLevelFromSlider(true));
 $("iso").addEventListener("change", () => setLevelFromSlider(false));
 $("iso-num").addEventListener("change", e => {
-  const v = Math.abs(parseFloat(e.target.value.replace("×10", "e")));
+  const v = parseFloat(e.target.value.replace("×10", "e"));
   if (!Number.isFinite(v)) return syncLevel();
-  S.iso = S.mode === "log" ? v : parseFloat(e.target.value);
+  S.iso = S.mode === "log" ? Math.abs(v) : v;
   if (S.mode === "log") S.p = fractionAbove(S.st, S.iso);
-  syncLevel(); drawSurface(); summaries();
+  syncLevel(); requestSurface(false); summaries();
 });
-
 for (const b of document.querySelectorAll("[data-along]")) b.addEventListener("click", () => viewAlong(+b.dataset.along));
 $("btn-reset").addEventListener("click", resetView);
 $("btn-snap").addEventListener("click", snapshot);
-$("btn-open").addEventListener("click", () => $("file").click());
+$("btn-home").addEventListener("click", showHome);
+$("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
+$("label-done").addEventListener("click", () => setLabelMode(false));
+$("label-clear").addEventListener("click", () => { S.labels = []; uploadLabels(); requestRender(); });
+$("btn-back").addEventListener("click", () => { $("empty").hidden = true; });
 $("btn-open2").addEventListener("click", () => $("file").click());
+$("btn-open").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", e => { openFiles(e.target.files); e.target.value = ""; });
 for (const b of document.querySelectorAll("[data-example]")) b.addEventListener("click", () => example(b.dataset.example));
 
-function snapshot() {
-  if (!viewer) return;
-  const a = document.createElement("a");
-  a.href = viewer.pngURI();
-  a.download = (S.name.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png";
-  document.body.append(a); a.click(); a.remove();
-}
-function restyle() {
-  if (!viewer) return;
-  viewer.setBackgroundColor(css("--bg"));
-  drawStructure(); drawSurface(); drawTriad();
-}
-
 let dragDepth = 0;
-addEventListener("dragenter", e => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { dragDepth++; $("drop").hidden = false; e.preventDefault(); } });
-addEventListener("dragover", e => e.preventDefault());
-addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("drop").hidden = true; } });
-addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("drop").hidden = true; if (e.dataTransfer?.files?.length) openFiles(e.dataTransfer.files); });
-addEventListener("paste", e => {
-  if (e.target.closest && e.target.closest("input, select, textarea")) return;
+window.addEventListener("dragenter", e => { if ([...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files")) { dragDepth++; $("drop").hidden = false; e.preventDefault(); } });
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("drop").hidden = true; } });
+window.addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("drop").hidden = true; if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) openFiles(e.dataTransfer.files); });
+window.addEventListener("paste", e => {
+  if (e.target && e.target.closest && e.target.closest("input, select, textarea")) return;
   const t = e.clipboardData && e.clipboardData.getData("text");
   if (t && t.trim()) openFiles([new File([t], "pasted")]);
 });
-addEventListener("keydown", e => {
-  if (e.target.closest && e.target.closest("input, select, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+window.addEventListener("keydown", e => {
+  if ((e.target && e.target.closest && e.target.closest("input, select, textarea")) || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === "o") $("file").click();
-  else if (!S.structure) return;
+  else if (k === "escape") {
+    if (!$("empty").hidden && S.structure) $("empty").hidden = true;
+    else if (S.labelMode) setLabelMode(false);
+    else if (S.sel.length) clearSelection();
+    else for (const d of document.querySelectorAll(".sec[open]")) d.open = false;
+  }
+  else if (!S.structure || !$("empty").hidden) return;
   else if (k === "r") resetView();
   else if (k === "s") snapshot();
-  else if ("abc".includes(k) && k.length === 1) viewAlong("abc".indexOf(k));
-  else if (k === "escape") for (const d of document.querySelectorAll(".sec[open]")) d.open = false;
+  else if (k === "l") setLabelMode(!S.labelMode);
+  else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); });
-
+try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
 try { const t = localStorage.getItem("isoview-theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
-segState();
 
-const qp = new URLSearchParams(location.search);
+startWorker();
+segState();
+// test hook (tests set globalThis.__isoviewTest before importing this module)
+if (globalThis.__isoviewTest) globalThis.__isoview = { S, cam, get disp() { return disp; } };
 if (qp.get("url")) {
   const u = qp.get("url");
   fetch(u).then(r => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.blob(); })

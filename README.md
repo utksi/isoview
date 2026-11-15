@@ -1,7 +1,7 @@
 # isoview
 
-Crystal structures and volumetric data in the browser. Open a file, turn it around, pick an isovalue.
-Everything runs locally: files are read on your device and never uploaded.
+Crystal structures and volumetric data in the browser. Open a file, turn it around, pick an isovalue, click atoms to
+measure them. Everything runs locally: files are read on your device and never uploaded.
 
 **Open it:** https://utkarsh.science/isoview/
 
@@ -25,7 +25,20 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   Signed fields show a positive and a negative surface.
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
-- **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice vector, `S` save a PNG.
+- **Measure**: click two atoms for their distance, three for the angle at the middle one, four for the dihedral.
+  Click empty space to clear.
+- **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
+  Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
+- **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
+  vector, `L` labels, `S` save a PNG. The isoview wordmark returns to the opening page.
+
+## How it draws
+
+WebGPU where the browser has it, WebGL2 otherwise (`?gl=webgl2` forces the fallback). Atoms are ray-cast spheres on
+camera-facing quads (exact silhouettes and depth, one instanced draw call), bonds are instanced cylinders, cell edges
+constant-width lines, and frames are drawn only when something changes. Isosurfaces come from marching cubes in a Web
+Worker (shared vertices, gradient normals); translucent surfaces use a depth pre-pass so only their front layer is
+blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
 
 ## How the numbers are made
 
@@ -38,6 +51,7 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 ## Develop
 
 A static site with no build step. Serve the folder with any static server (`python3 -m http.server`) and open it.
-Tests of the readers and numerics run in Node: `node tests/run.mjs`. Rendering uses [3Dmol.js](https://3dmol.org).
+Tests of the readers, meshing, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
+table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).
 
 MIT licence.

@@ -164,3 +164,31 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
   .dock { top: auto; bottom: calc(60px + env(safe-area-inset-bottom, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); width: auto; max-height: 52vh; }
   .bl { display: none; }
 }
+
+/* renderer canvas, measurement overlay, pills */
+#stage { touch-action: none; cursor: grab; }
+#stage:active { cursor: grabbing; }
+#stage.labelling { cursor: copy; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#ov { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; overflow: visible; }
+#ov .ml { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 4; fill: none; }
+#ov rect { fill: var(--solid); stroke: var(--line2); stroke-width: 1; }
+#ov text { font: 600 11px var(--mono); fill: var(--ink); }
+.pill { position: fixed; z-index: 3; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; justify-content: center; padding: 7px 8px 7px 14px; border-radius: 12px;
+  max-width: min(720px, calc(100vw - 300px)); font: 12px var(--mono); color: var(--ink2); }
+.pill .atoms { color: var(--ink); font-weight: 600; }
+.pill .mk { color: var(--ink3); }
+.pill .mv { color: var(--ink); margin-left: -6px; }
+.pill button { border: 0; background: var(--hover); color: var(--ink2); padding: 4px 10px; border-radius: 7px; font: 12px var(--sans); }
+.pill button:hover { color: var(--ink); }
+.pill button.strong { background: var(--accent); color: #fff; }
+:root[data-theme="dark"] .pill button.strong { color: #0f1013; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pill button.strong { color: #0f1013; } }
+.pill .x { width: 24px; height: 24px; padding: 0; border-radius: 6px; font-size: 15px; line-height: 1; }
+.br button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.num-plain { font: 12px var(--mono); color: var(--ink2); }
+#empty { background: var(--bg); }
+.back { border: 0; background: none; color: var(--accent); font-size: 13px; padding: 2px 6px; border-radius: 6px; }
+.back:hover { background: var(--hover); }
+@media (max-width: 720px) { .pill { max-width: calc(100vw - 24px); bottom: calc(60px + env(safe-area-inset-bottom, 0px)); } }
