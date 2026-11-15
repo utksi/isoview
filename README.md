@@ -15,6 +15,10 @@ files are read on your device and never uploaded.
 | Wavefunctions | WAVECAR from `vasp_std`, `vasp_gam` and `vasp_ncl`: pick spin, k-point and band, and see \|ψ\|² (or ψ itself for Γ-only builds) |
 | Trajectories | XDATCAR (fixed or changing cell), OUTCAR and vasprun.xml (every ionic step, with its energy), ASE `.traj`, xyz / extended xyz (several frames, `energy=`), animated XSF (AXSF), LAMMPS text dumps (orthogonal or triclinic box; element, mass or type columns), Quantum ESPRESSO `pw.x` output (relax, md, vc-relax), PDB with MODELs, GROMACS `.gro`, CASTEP `.md` / `.geom` |
 
+Gzip-compressed files (`vasprun.xml.gz`, `CHGCAR.gz`, ...) open directly. The opening page offers a sample of most
+formats, including real VASP, Quantum ESPRESSO and CASTEP outputs from public test data; see
+[`examples/README.md`](examples/README.md) for where each comes from.
+
 Drop several files at once to combine them, e.g. a `WAVECAR` with its `CONTCAR`. You can also paste a structure
 as text, or link to a file with `?url=https://...` (the host must allow cross-origin requests).
 

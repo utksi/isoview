@@ -547,6 +547,8 @@ function derive(kind) {
 }
 
 /* ------------------------------------------------------------------ trajectories */
+/** An energy (eV) for display: four decimals, or three significant digits when it is below 1 meV in size. */
+const fmtE = e => (Math.abs(e) >= 1e-3 || e === 0 ? e.toFixed(4) : e.toExponential(2));
 const trajItems = () => [...S.items.values()].filter(it => it.traj && S.layers.some(L => L.item === it.id));
 const maxFrames = () => trajItems().reduce((m, it) => Math.max(m, it.traj.n), 0);
 const frameOf = it => Math.min(S.frame, it.traj.n - 1);
@@ -607,7 +609,7 @@ function updatePlayer() {
   const sl = $("pl-frame");
   sl.max = n - 1; sl.value = S.frame;
   const it = mainTraj(), E = it && it.traj.energy, e = E ? E[frameOf(it)] : NaN;
-  $("pl-count").textContent = `${S.frame + 1} / ${n}${Number.isFinite(e) ? ` · ${e.toFixed(4)} eV` : ""}`;
+  $("pl-count").textContent = `${S.frame + 1} / ${n}${Number.isFinite(e) ? ` · ${fmtE(e)} eV` : ""}`;
   $("pl-play").setAttribute("aria-pressed", String(S.playing));
   const pt = S.playing ? "Pause (Space)" : "Play (Space)";
   $("pl-play").title = pt; $("pl-play").setAttribute("aria-label", pt);
@@ -630,8 +632,8 @@ function drawSpark() {
   const f0 = frameOf(it), e0 = E[f0];
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = `<line class="base" x1="0" x2="${W}" y1="${H - 0.5}" y2="${H - 0.5}"/><path class="ln" d="${d}"/>` + (Number.isFinite(e0) ? `<circle class="now" cx="${X(f0).toFixed(1)}" cy="${Y(e0).toFixed(1)}" r="3.5"/>` : "");
-  $("tr-e-range").textContent = `E ${lo.toFixed(4)} … ${hi.toFixed(4)} eV`;
-  $("tr-e-now").textContent = Number.isFinite(e0) ? `frame ${f0 + 1}: ${(e0 - lo).toFixed(4)} eV above min` : `frame ${f0 + 1}`;
+  $("tr-e-range").textContent = `E ${fmtE(lo)} … ${fmtE(hi)} eV`;
+  $("tr-e-now").textContent = Number.isFinite(e0) ? `frame ${f0 + 1}: ${fmtE(e0 - lo)} eV above min` : `frame ${f0 + 1}`;
 }
 const sparkFrame = e => { const it = mainTraj(), svg = $("tr-svg"), r = svg.getBoundingClientRect(), W = r.width || 280; return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left - 3) / (W - 6))) * (it.traj.n - 1)); };
 function videoMime() {
@@ -1193,6 +1195,13 @@ function showHome() {
   back.hidden = !S.layers.length;
   if (S.layers.length) back.textContent = `Back to ${$("doc-name").textContent}`;
 }
+/** Samples on the opening page (examples/, see examples/README.md for each file's source); h3d is computed. */
+const SAMPLES = {
+  rutile: "rutile-TiO2.cif", sto: "SrTiO3.vasp", zno: "ZnO-wurtzite.xsf", graphene: "graphene.pw.in", nacl: "NaCl.geometry.in", c60: "C60.xyz",
+  ethanol: "ethanol.pdb", pwo: "Si.pwscf.out", si: "Si-model.CHGCAR", elf: "C4.ELFCAR.gz", locpot: "Li.LOCPOT.gz", n2: "N2.WAVECAR",
+  benzene: "benzene-pi.cube", outcar: "Li-relax.OUTCAR", vasprun: "Si64-md.vasprun.xml.gz", fe2o3: "Fe2O3-molten.XDATCAR", castep: "Ar-LJ.md",
+  cu55: "Cu55-900K.traj", pt13: "Pt13-relax.extxyz", al: "Al-800K.XDATCAR", ag: "Ag-1600K.lammpstrj", ni: "Ni100-adatom-1100K.axsf",
+};
 async function example(id) {
   busy(true);
   try {
@@ -1201,10 +1210,11 @@ async function example(id) {
       await addItem({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })), example: "h3d" }, false);
       return;
     }
-    const url = { rutile: "examples/rutile-TiO2.cif", graphene: "examples/graphene.pw.in" }[id];
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`Could not load the example (${r.status}).`);
-    await openFiles([new File([await r.blob()], url.split("/").pop())], "replace");
+    const name = SAMPLES[id];
+    if (!name) throw new Error(`There is no sample called "${id}".`);
+    const r = await fetch("examples/" + name);
+    if (!r.ok) throw new Error(`Could not load the sample (${r.status}).`);
+    await openFiles([new File([await r.blob()], name)], "replace");
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
 }

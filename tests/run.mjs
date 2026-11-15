@@ -389,5 +389,23 @@ if (env.ISOVIEW_WAVECAR) {
   const bad = files.filter(f => map[f] !== `${f}?v=${v}`);
   ok(!bad.length && html.includes(`css/style.css?v=${v}`), `import map versions all ${files.length} modules as v${v}${bad.length ? "; missing or stale: " + bad.join(", ") : ""}`);
 }
+/* samples on the opening page: every button has a file, every file opens with what it should show */
+{
+  const app = fs.readFileSync(new URL("../js/app.js", import.meta.url), "utf8"), html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const SAMPLES = Object.fromEntries([...app.match(/const SAMPLES = \{([\s\S]*?)\};/)[1].matchAll(/(\w+): "([^"]+)"/g)].map(m => [m[1], m[2]]));
+  const ids = [...html.matchAll(/data-example="(\w+)"/g)].map(m => m[1]);
+  ok(ids.length >= 20 && ids.every(i => i === "h3d" || SAMPLES[i]) && Object.keys(SAMPLES).every(k => ids.includes(k)), `${ids.length} sample buttons, each with a file in SAMPLES (and no file without a button)`);
+  const want = { cu55: d => d.traj.n === 101 && d.traj.energy, vasprun: d => d.traj.n === 10 && d.structure.species.length === 64, outcar: d => d.traj.n === 3, fe2o3: d => d.traj.n === 5,
+    castep: d => d.traj.n === 3, pt13: d => d.traj.n === 34, al: d => d.traj.n === 61, ag: d => d.traj.n === 51, ni: d => d.traj.n === 51,
+    si: d => near(d.fields[0].stats.integral, 32, 1e-3), elf: d => d.fields.length === 2, locpot: d => d.fields[0].kind === "linear", benzene: d => d.fields[0].kind === "signed",
+    n2: d => d.wave && d.wave.nb === 9, pwo: d => d.structure.species.length === 2 };
+  const bad = [];
+  for (const [id, f] of Object.entries(SAMPLES)) {
+    const b = fs.readFileSync(new URL("../examples/" + f, import.meta.url));
+    try { const { result: d } = await handle({ op: "open", files: [new File([b], f)] }); if (!(d.structure && d.structure.species.length || d.wave) || (want[id] && !want[id](d))) bad.push(id); }
+    catch (e) { bad.push(`${id} (${e.message})`); }
+  }
+  ok(!bad.length, `all ${Object.keys(SAMPLES).length} sample files open (gzip ones included) with the expected frames, fields or bands${bad.length ? "; wrong: " + bad.join(", ") : ""}`);
+}
 console.log(`\n${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);

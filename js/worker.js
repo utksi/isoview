@@ -12,6 +12,8 @@
  *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
  *   drop { ds }                           -> {}  (frees the dataset)
  * meta = the field without `data`, plus `stats`.
+ * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
+ * DecompressionStream; the name loses its ".gz".
  */
 import { detectKind, parseText, isWavecarHeader } from "./formats.js";
 import { isUlm, parseAseTraj } from "./traj.js";
@@ -38,9 +40,19 @@ function hydrogen3d() {
     fields: [{ name: "ψ 3d(x²−y²)", unit: "Å⁻³ᐟ²", n: [n, n, n], data, origin: [-L / 2, -L / 2, -L / 2], span: box, periodic: false, closed: false, kind: "signed" }], notes: [] };
 }
 
-async function open(files) {
+/** The file itself, or its gzip-decompressed content (as a File without the .gz suffix). */
+async function gunzip(f) {
+  const m = new Uint8Array(await f.slice(0, 2).arrayBuffer());
+  if (m[0] !== 0x1f || m[1] !== 0x8b) return f;
+  if (typeof DecompressionStream === "undefined") throw new Error(`${f.name} is gzip-compressed and this browser cannot unpack it; unpack it first`);
+  const blob = await new Response(f.stream().pipeThrough(new DecompressionStream("gzip"))).blob();
+  return new File([blob], f.name.replace(/\.gz$/i, ""));
+}
+
+async function open(list) {
   let structure = null, fields = [], wave = null, traj = null, notes = [], title = "";
-  for (const f of files) {
+  for (const f0 of list) {
+    const f = await gunzip(f0);
     const head = await f.slice(0, 65536).arrayBuffer();
     if (isWavecarHeader(head)) { wave = await Wavecar.open((o, l) => f.slice(o, o + l).arrayBuffer()); continue; }
     let d;
