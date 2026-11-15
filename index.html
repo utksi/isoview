@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>isoview</title>
+<meta name="description" content="Crystal structures and volumetric data in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="stage" aria-label="3D view"></div>
+
+<header class="tl">
+  <button type="button" class="brand" id="btn-open" title="Open files (O)">
+    <svg class="glyph" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.2"><ellipse cx="16" cy="16" rx="13" ry="9" transform="rotate(-24 16 16)"/><ellipse cx="16.8" cy="15.4" rx="7.6" ry="4.8" transform="rotate(-24 16 16)"/></g><circle cx="17.4" cy="15" r="2" fill="currentColor"/></svg>
+    <span>isoview</span>
+  </button>
+  <div class="doc" id="doc" hidden><span id="doc-name"></span><span id="doc-sub"></span></div>
+</header>
+
+<aside class="dock glass" id="dock" hidden>
+  <details class="sec" name="dock" id="sec-structure">
+    <summary><span>Structure</span><em id="sum-structure"></em></summary>
+    <div class="body">
+      <div class="row"><span class="lab">Style</span><div class="seg" data-key="style"><button type="button" value="ball">Ball</button><button type="button" value="space">Space</button><button type="button" value="stick">Stick</button><button type="button" value="off">Off</button></div></div>
+      <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
+      <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
+      <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output></div></div>
+      <div class="row" id="row-ionic"><label class="lab" for="ionic">Bond Li–Cs, Ca–Ba</label><input type="checkbox" class="sw" id="ionic"></div>
+      <div class="row pbc"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
+      <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
+      <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
+    </div>
+  </details>
+
+  <details class="sec" name="dock" id="sec-surface" hidden>
+    <summary><span>Surface</span><em id="sum-surface"></em></summary>
+    <div class="body">
+      <div class="row" id="row-field"><label class="lab" for="field">Field</label><select id="field"></select></div>
+      <div class="row"><label class="lab" for="surf">Show</label><input type="checkbox" class="sw" id="surf" checked></div>
+      <div class="row col"><div class="lv"><label class="lab" for="iso">Level</label><input id="iso-num" class="num-in" inputmode="decimal" aria-label="isovalue" spellcheck="false"></div><input type="range" id="iso" min="0" max="1000" step="1"><div class="hint" id="iso-hint"></div></div>
+      <div class="row" id="row-pm"><label class="lab" for="pm">Negative lobe</label><input type="checkbox" class="sw" id="pm" checked></div>
+      <div class="row"><label class="lab" for="opacity">Opacity</label><input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.85"></div>
+      <div class="row"><span class="lab">Resolution</span><div class="seg" data-key="res"><button type="button" value="auto">Auto</button><button type="button" value="1">Full</button><button type="button" value="2">½</button><button type="button" value="4">¼</button></div></div>
+      <div class="stats" id="stats"></div>
+    </div>
+  </details>
+
+  <details class="sec" name="dock" id="sec-orbital" hidden>
+    <summary><span>Orbital</span><em id="sum-orbital"></em></summary>
+    <div class="body">
+      <div class="row" id="row-spin"><span class="lab">Spin</span><div class="seg" data-key="wspin"><button type="button" value="0">↑</button><button type="button" value="1">↓</button></div></div>
+      <div class="row" id="row-k"><label class="lab" for="kpt">k-point</label><select id="kpt"></select></div>
+      <div class="row" id="row-wmode"><span class="lab">Show</span><div class="seg" data-key="wmode"><button type="button" value="density">|ψ|²</button><button type="button" value="psi">ψ</button></div></div>
+      <div class="bands" id="bands" role="listbox" aria-label="Bands" tabindex="0"></div>
+      <div class="row" id="row-half"><span class="lab">Γ half grid</span><div class="seg" data-key="half"><button type="button" value="x">x</button><button type="button" value="z">z</button></div></div>
+    </div>
+  </details>
+
+  <details class="sec" name="dock" id="sec-view">
+    <summary><span>View</span><em id="sum-view"></em></summary>
+    <div class="body">
+      <div class="row"><span class="lab">Projection</span><div class="seg" data-key="proj"><button type="button" value="persp">Perspective</button><button type="button" value="ortho">Ortho</button></div></div>
+      <div class="row"><span class="lab">Theme</span><div class="seg" data-key="theme"><button type="button" value="auto">Auto</button><button type="button" value="light">Light</button><button type="button" value="dark">Dark</button></div></div>
+      <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>S</kbd> save image</p>
+    </div>
+  </details>
+</aside>
+
+<footer class="bl" id="bl" hidden>
+  <svg id="triad" viewBox="-34 -34 68 68" aria-hidden="true"></svg>
+  <div id="info"></div>
+</footer>
+
+<div class="br glass" id="br" hidden>
+  <button type="button" data-along="0" title="View along a (A)">a</button>
+  <button type="button" data-along="1" title="View along b (B)">b</button>
+  <button type="button" data-along="2" title="View along c (C)">c</button>
+  <span class="sep"></span>
+  <button type="button" id="btn-reset" title="Reset view (R)" aria-label="Reset view"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button type="button" id="btn-snap" title="Save image (S)" aria-label="Save image"><svg viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+</div>
+
+<section id="empty">
+  <div class="hero">
+    <svg class="glyph big" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="16" cy="16" rx="13" ry="9" transform="rotate(-24 16 16)"/><ellipse cx="16.8" cy="15.4" rx="7.6" ry="4.8" transform="rotate(-24 16 16)"/></g><circle cx="17.4" cy="15" r="1.8" fill="currentColor"/></svg>
+    <h1>isoview</h1>
+    <p class="lede">Crystal structures and volumetric data, in the browser.</p>
+    <div class="actions"><button type="button" class="primary" id="btn-open2">Open files</button><span>or drop them anywhere</span></div>
+    <p class="formats">POSCAR · CONTCAR · CIF · XSF · pw.in · cube · xyz · geometry.in<br>CHGCAR · PARCHG · LOCPOT · ELFCAR · WAVECAR</p>
+    <p class="examples">Try <button type="button" data-example="rutile">rutile TiO₂</button> · <button type="button" data-example="graphene">graphene</button> · <button type="button" data-example="h3d">a hydrogen 3d orbital</button></p>
+    <p class="fine">Files are read on your device and never uploaded. A WAVECAR is read band by band, so large ones open quickly. <a href="https://github.com/utksi/isoview" target="_blank" rel="noopener">Source</a></p>
+  </div>
+</section>
+
+<div id="drop" hidden><div>Drop to open</div></div>
+<div id="busy" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<input type="file" id="file" multiple hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.4.2/3Dmol-min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
