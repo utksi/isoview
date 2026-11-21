@@ -1,7 +1,7 @@
 # Desktop app (src-tauri/): builds the installers on GitHub's macOS, Windows and Linux machines.
 # Push to the desktop branch or run by hand: installers are attached to the run as artifacts.
-# Push a tag app-vX.Y.Z: the same, with the Windows exe and installers signed through SignPath (.signpath/README.md),
-# plus one draft release holding every installer (publish it by hand).
+# Push a tag app-vX.Y.Z: the same (Windows exe and installers signed through SignPath once that is set up; not active,
+# see .signpath/README.md), plus one draft release holding every installer (publish it by hand).
 name: desktop app
 
 on:

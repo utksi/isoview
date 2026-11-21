@@ -1,7 +1,9 @@
 # Code signing of the Windows app (SignPath)
 
-Windows releases of the desktop app are signed through SignPath's free program for open-source projects, so that
-Windows (Smart App Control, SmartScreen) lets them run. `.github/workflows/desktop.yml` signs only builds of
+Not active: the project has not applied to SignPath (2026-11-22). This is ready for when it does. Windows releases of
+the desktop app would then be signed through SignPath's free program for open-source projects, so that Windows
+(Smart App Control, SmartScreen) lets them run; the README would also need SignPath's "Code signing policy" section.
+`.github/workflows/desktop.yml` signs only builds of
 `app-v*` tags, in two signing requests: first `isoview.exe`, then the `.msi` and the setup `.exe` made around it.
 
 Set-up, once SignPath Foundation has accepted the project:
