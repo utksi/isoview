@@ -2,5 +2,6 @@
   "name": "isoview",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/run.mjs" }
+  "scripts": { "test": "node tests/run.mjs", "tauri": "tauri" },
+  "devDependencies": { "@tauri-apps/cli": "^2" }
 }

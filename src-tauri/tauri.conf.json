@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "isoview",
+  "version": "0.1.0",
+  "identifier": "science.utkarsh.isoview",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "node tools/stage-desktop.mjs",
+    "beforeDevCommand": "node tools/stage-desktop.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "isoview",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 720,
+        "minHeight": 480,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "Utkarsh Singh",
+    "copyright": "Copyright (c) 2026 Utkarsh Singh. MIT licence.",
+    "license": "MIT",
+    "shortDescription": "Crystal structures, volumetric data, orbitals and trajectories",
+    "longDescription": "isoview opens crystal structures, volumetric data (CHGCAR, LOCPOT, ELFCAR, cube, XSF), VASP WAVECAR orbitals and trajectories, and lets you measure, edit and export them. Everything stays on your computer.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

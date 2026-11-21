@@ -565,9 +565,19 @@ function exportLayer(fmt) {
   download(txt, it.name.split(" + ")[0].replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") + "_isoview" + ext);
   toast(`Exported ${sh.species.length} atoms as ${fmt === "cif" ? "CIF" : fmt === "xyz" ? "extended XYZ" : "POSCAR"}${note ? " (" + note + ")" : ""}.`, false, 4000);
 }
+/** Saves data (Blob or text) as a file called name: a browser download, or in the desktop app (Tauri, src-tauri/)
+ *  a native Save dialog shown by its save_file command, which receives the bytes and the name (ASCII) in a header. */
 function download(data, name) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: "text/plain" });
+  // WHY: system webviews (WKWebView, WebKitGTK) do not all act on <a download>; the desktop app saves through Rust.
+  const T = globalThis.__TAURI__;
+  if (T && T.core) {
+    blob.arrayBuffer().then(b => T.core.invoke("save_file", new Uint8Array(b), { headers: { "x-file-name": name } }))
+      .catch(e => toast(`Could not save ${name}: ${e && e.message ? e.message : e}`, true));
+    return;
+  }
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: "text/plain" }));
+  a.href = URL.createObjectURL(blob);
   a.download = name;
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1390,11 +1400,7 @@ function snapshot() {
   frame();
   canvas.toBlob(b => {
     if (!b) return toast("Could not capture the image.", true);
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(b);
-    a.download = ($("doc-name").textContent.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png";
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    download(b, ($("doc-name").textContent.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png");
   }, "image/png");
 }
 function restyle() { if (!R) return; readPalette(); R.setBackground(pal.bg); requestRender(); }

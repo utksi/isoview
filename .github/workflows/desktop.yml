@@ -1,0 +1,95 @@
+# Desktop app (src-tauri/): builds the installers on GitHub's macOS, Windows and Linux machines.
+# Push to the desktop branch or run by hand: installers are attached to the run as artifacts.
+# Push a tag app-vX.Y.Z: the same, plus one draft release holding every installer (publish it by hand).
+name: desktop app
+
+on:
+  push:
+    branches: [desktop]
+    tags: ["app-v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin, name: macos-arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, name: macos-x64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, name: windows-x64 }
+          # WHY: 22.04, not latest: an AppImage runs on Linux systems whose glibc is at least as new as the builder's.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, name: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - name: Linux libraries (WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Unit tests
+        if: runner.os == 'Linux'
+        run: node tests/run.mjs
+      - run: npm ci
+      - run: npx tauri build --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: isoview-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+      # Linux: start the AppImage on a virtual display, let it open a sample (ISOVIEW_SMOKE, src-tauri/src/main.rs),
+      # take a screenshot, and fail if the app has quit by then.
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb imagemagick
+          app=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage)
+          ISOVIEW_SMOKE=1 APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1600x1000x24" bash -c "
+            \"$app\" > smoke.log 2>&1 & pid=\$!
+            sleep 25
+            import -window root smoke-linux.png
+            if kill -0 \$pid; then echo 'app still running after 25 s'; kill \$pid; ok=0; else echo 'app quit'; ok=1; fi
+            cat smoke.log; exit \$ok"
+      - name: Smoke screenshot
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-linux
+          path: |
+            smoke-linux.png
+            smoke.log
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      # WHY: one job makes the release; parallel build jobs would each create their own draft.
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: out/**/*

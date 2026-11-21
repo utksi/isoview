@@ -1,0 +1,5 @@
+# desktop app build outputs (tools/stage-desktop.mjs, cargo, tauri-build, npm)
+/dist/
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/

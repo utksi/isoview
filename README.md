@@ -125,4 +125,20 @@ Tests of the readers (including every trajectory format, against ASE on the file
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).
 
+## Desktop app
+
+The same isoview as a desktop app for macOS, Windows and Linux, built with [Tauri](https://tauri.app) (Rust, using
+the system's own web view, so installers are a few MB). The site's files are built into the app, so it works
+offline. In the app, Export, PNG, GIF and movies open a native Save dialog.
+
+Installers are built by GitHub Actions (`.github/workflows/desktop.yml`): `.dmg` for macOS (Apple silicon and
+Intel), `.msi` and `.exe` for Windows, `.deb`, `.rpm` and `.AppImage` for Linux. The apps are not yet signed by a
+paid developer certificate: on macOS, allow isoview in System Settings > Privacy & Security after the first launch;
+on Windows, choose "More info > Run anyway" in SmartScreen.
+
+To build one yourself you need Node and Rust, plus WebKitGTK on Linux (see Tauri's
+[prerequisites](https://tauri.app/start/prerequisites/)). Then run `npm install`, then `npx tauri build` (or
+`npx tauri dev` for a window that runs from your checkout). `tools/stage-desktop.mjs` copies the site into `dist/`
+for the app; `src-tauri/` holds the Rust side.
+
 MIT licence.
