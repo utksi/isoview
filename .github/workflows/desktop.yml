@@ -133,8 +133,8 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
       # Linux: start the app on a virtual display and wait for its 1400x900 window (on GitHub's runner GTK first waits
       # about 20 s for a desktop portal that is not installed there; real desktops do not), let it open a sample
-      # (ISOVIEW_SMOKE, src-tauri/src/main.rs), then take a screenshot. Runs the AppImage and the bare binary (system
-      # WebKitGTK). Fails if the AppImage's window does not appear within 120 s.
+      # (ISOVIEW_SMOKE, src-tauri/src/main.rs), then take a screenshot 35 s later. Runs the AppImage and the bare
+      # binary (system WebKitGTK). Fails if the AppImage's window does not appear within 120 s.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -150,9 +150,9 @@ jobs:
                 sleep 1; t=$((t+1)); kill -0 $pid || { echo "--- quit after $t s" >> $log; exit 1; }
                 [ $t -ge 120 ] && { echo "--- no window after 120 s" >> $log; import -window root smoke-'$name'.png; exit 1; }; done
               echo "--- window after $t s" >> $log
-              sleep 20
+              sleep 35
               import -window root smoke-'$name'.png
-              kill -0 $pid && { echo "--- running 20 s later" >> $log; kill $pid; exit 0; }
+              kill -0 $pid && { echo "--- running 35 s later" >> $log; kill $pid; exit 0; }
               echo "--- quit" >> $log; exit 1' _ "$@" && r=0 || r=1
             echo "===== $name"; grep -v "^\s*$" smoke-$name.log | tail -40; return $r
           }

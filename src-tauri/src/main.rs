@@ -33,24 +33,33 @@ async fn save_file(app: tauri::AppHandle, request: Request<'_>) -> Result<bool, 
 }
 
 /// Smoke test for CI, run only when the environment variable ISOVIEW_SMOKE is set: opens the "Si model density"
-/// sample (worker, WebAssembly symmetry, marching cubes, drawing) and after 10 s shows a box with the renderer, the
-/// space group, the web APIs present and any page errors, so a screenshot shows whether the app works.
+/// sample (fetch, worker, WebAssembly symmetry, marching cubes, drawing), logs with times every toast, page error,
+/// console error, fetch status and worker start or failure, and after 25 s shows the log with the renderer, the
+/// space group and the web APIs present, so a screenshot shows whether the app works.
 const SMOKE_JS: &str = r#"(() => {
-  const errs = [];
-  addEventListener("error", e => errs.push(e.message));
-  addEventListener("unhandledrejection", e => errs.push(String(e.reason)));
-  const go = () => { const b = document.querySelector('[data-example="si"]'); if (b) b.click(); else setTimeout(go, 200); };
+  const log = [], t0 = performance.now(), note = m => log.push(((performance.now() - t0) / 1000).toFixed(1) + " s  " + m);
+  addEventListener("error", e => note("error: " + e.message));
+  addEventListener("unhandledrejection", e => note("rejection: " + e.reason));
+  const ce = console.error; console.error = (...a) => { note("console.error: " + a.join(" ")); ce(...a); };
+  const toast = document.getElementById("toast");
+  if (toast) new MutationObserver(() => { const s = toast.textContent.trim(); if (s) note("toast: " + s); })
+    .observe(toast, { childList: true, subtree: true, characterData: true });
+  const f = window.fetch;
+  window.fetch = (...a) => f(...a).then(r => (note("fetch " + a[0] + ": " + r.status), r), e => { note("fetch " + a[0] + " failed: " + e); throw e; });
+  const W = window.Worker;
+  window.Worker = function (u, o) { note("worker " + u); const w = new W(u, o); w.addEventListener("error", e => note("worker error: " + (e.message || "could not start"))); return w; };
+  const go = () => { const b = document.querySelector('[data-example="si"]'); if (b) { note("click si"); b.click(); } else setTimeout(go, 200); };
   go();
   setTimeout(() => {
     const t = id => ((document.getElementById(id) || {}).textContent || "").trim();
     const d = document.createElement("pre");
-    d.style.cssText = "position:fixed;left:12px;bottom:60px;z-index:99999;margin:0;padding:8px 12px;background:#ffc;color:#000;font:13px monospace;white-space:pre-wrap;max-width:70%";
-    d.textContent = ["smoke test", "renderer: " + t("gfx"), "space group: " + t("doc-sg"), "toast: " + t("toast"),
+    d.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:99999;margin:0;padding:8px 12px;background:#ffc;color:#000;font:12px monospace;white-space:pre-wrap;max-width:75%";
+    d.textContent = ["smoke test", "renderer: " + t("gfx") + ", space group: " + t("doc-sg") + ", title: " + t("doc-name"),
       "webgl2: " + !!document.createElement("canvas").getContext("webgl2") + ", webgpu: " + !!navigator.gpu +
       ", MediaRecorder: " + (typeof MediaRecorder !== "undefined") + ", indexedDB: " + (typeof indexedDB !== "undefined"),
-      "errors: " + (errs.join("; ") || "none")].join("\n");
+      ...log].join("\n");
     document.body.append(d);
-  }, 10000);
+  }, 25000);
 })();"#;
 
 fn main() {
