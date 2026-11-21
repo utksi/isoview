@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "installers": the upload is a zip holding msi/isoview_<version>_x64_en-US.msi and
+     nsis/isoview_<version>_x64-setup.exe, both made around the already signed isoview.exe; sign both. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <msi-file path="msi/*.msi">
+      <authenticode-sign/>
+    </msi-file>
+    <pe-file path="nsis/*-setup.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

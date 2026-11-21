@@ -1,6 +1,7 @@
 # Desktop app (src-tauri/): builds the installers on GitHub's macOS, Windows and Linux machines.
 # Push to the desktop branch or run by hand: installers are attached to the run as artifacts.
-# Push a tag app-vX.Y.Z: the same, plus one draft release holding every installer (publish it by hand).
+# Push a tag app-vX.Y.Z: the same, with the Windows exe and installers signed through SignPath (.signpath/README.md),
+# plus one draft release holding every installer (publish it by hand).
 name: desktop app
 
 on:
@@ -23,6 +24,10 @@ jobs:
           # WHY: 22.04, not latest: an AppImage runs on Linux systems whose glibc is at least as new as the builder's.
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, name: linux-x64 }
     runs-on: ${{ matrix.os }}
+    env:
+      # WHY: only Windows builds of app-v* tags are signed, and only once SignPath is set up (repository variable
+      # SIGNPATH_ORGANIZATION_ID; see .signpath/README.md): each request needs a manual approval there.
+      SIGN: ${{ matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/app-v') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,7 +48,77 @@ jobs:
         if: runner.os == 'Linux'
         run: node tests/run.mjs
       - run: npm ci
-      - run: npx tauri build --target ${{ matrix.target }}
+      - name: Build (macOS, Linux)
+        if: runner.os != 'Windows'
+        run: npx tauri build --target ${{ matrix.target }}
+      # Windows, in two steps so that the exe inside the installers is signed too (Smart App Control checks it):
+      # build the exe; on app-v* tags sign it with SignPath; make the installers around it (--no-binary-patching
+      # keeps the signature); on tags sign the installers. Every signing request waits for a manual approval in SignPath.
+      - name: Build the exe (Windows)
+        if: runner.os == 'Windows'
+        run: npx tauri build --target ${{ matrix.target }} --no-bundle
+      - name: Upload the exe for signing
+        id: unsigned-exe
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: src-tauri/target/${{ matrix.target }}/release/isoview.exe
+      - name: Sign the exe (SignPath)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-exe
+      - name: Put the signed exe in place
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/${{ matrix.target }}/release/isoview.exe"
+          Get-ChildItem signed-exe -Recurse -Filter isoview.exe | Select-Object -First 1 | Copy-Item -Destination $exe -Force
+          $s = Get-AuthenticodeSignature $exe; "isoview.exe: $($s.Status), $($s.SignerCertificate.Subject)"
+          if ($s.Status -ne 'Valid') { exit 1 }
+      - name: Make the installers (Windows)
+        if: runner.os == 'Windows'
+        run: npx tauri bundle --target ${{ matrix.target }} --no-binary-patching
+      - name: Upload the installers for signing
+        id: unsigned-installers
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installers
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+      - name: Sign the installers (SignPath)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installers
+          github-artifact-id: ${{ steps.unsigned-installers.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-installers
+      - name: Put the signed installers in place
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $b = "src-tauri/target/${{ matrix.target }}/release/bundle"
+          Get-ChildItem signed-installers -Recurse -Filter *.msi | Copy-Item -Destination "$b/msi/" -Force
+          Get-ChildItem signed-installers -Recurse -Filter *-setup.exe | Copy-Item -Destination "$b/nsis/" -Force
+          $bad = 0
+          foreach ($f in Get-ChildItem "$b/msi/*.msi", "$b/nsis/*-setup.exe") {
+            $s = Get-AuthenticodeSignature $f.FullName; "$($f.Name): $($s.Status)"; if ($s.Status -ne 'Valid') { $bad = 1 } }
+          exit $bad
       - uses: actions/upload-artifact@v4
         with:
           name: isoview-${{ matrix.name }}

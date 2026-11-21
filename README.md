@@ -132,13 +132,26 @@ the system's own web view, so installers are a few MB). The site's files are bui
 offline. In the app, Export, PNG, GIF and movies open a native Save dialog.
 
 Installers are built by GitHub Actions (`.github/workflows/desktop.yml`): `.dmg` for macOS (Apple silicon and
-Intel), `.msi` and `.exe` for Windows, `.deb`, `.rpm` and `.AppImage` for Linux. The apps are not yet signed by a
-paid developer certificate: on macOS, allow isoview in System Settings > Privacy & Security after the first launch;
-on Windows, choose "More info > Run anyway" in SmartScreen.
+Intel), `.msi` and `.exe` for Windows, `.deb`, `.rpm` and `.AppImage` for Linux. On macOS the app is not signed
+by Apple: allow isoview in System Settings > Privacy & Security after the first launch. Windows releases are signed
+(see the code signing policy below); Windows with Smart App Control on runs signed releases only, and the `.msi` is
+the installer to use there.
 
 To build one yourself you need Node and Rust, plus WebKitGTK on Linux (see Tauri's
 [prerequisites](https://tauri.app/start/prerequisites/)). Then run `npm install`, then `npx tauri build` (or
 `npx tauri dev` for a window that runs from your checkout). `tools/stage-desktop.mjs` copies the site into `dist/`
 for the app; `src-tauri/` holds the Rust side.
+
+## Code signing policy
+
+Windows releases (tags `app-v*`) are signed. Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org). Builds are made by GitHub Actions from this repository
+(`.github/workflows/desktop.yml`, `.signpath/`); nothing built elsewhere is signed.
+
+- Committers and reviewers: [Utkarsh Singh (utksi)](https://github.com/utksi)
+- Approvers (each signing request): [Utkarsh Singh (utksi)](https://github.com/utksi)
+
+Privacy: this program will not transfer any information to other networked systems unless specifically requested by
+the user or the person installing or operating it. Files you open are read on your computer and never uploaded.
 
 MIT licence.
