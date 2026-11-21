@@ -130,37 +130,33 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-      # Linux: start the app on a virtual display, let it open a sample (ISOVIEW_SMOKE, src-tauri/src/main.rs), then
-      # record the X windows (map state, size), the WebKit processes and a screenshot. Variants: the AppImage; the bare
-      # binary (system WebKitGTK) alone, under a window manager, without compositing, and without the WebKit sandbox
-      # with debug messages. Fails only if the AppImage has quit after 25 s.
+      # Linux: start the app on a virtual display and wait for its 1400x900 window (on GitHub's runner GTK first waits
+      # about 20 s for a desktop portal that is not installed there; real desktops do not), let it open a sample
+      # (ISOVIEW_SMOKE, src-tauri/src/main.rs), then take a screenshot. Runs the AppImage and the bare binary (system
+      # WebKitGTK). Fails if the AppImage's window does not appear within 120 s.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y xvfb imagemagick x11-utils openbox
+          sudo apt-get install -y xvfb imagemagick x11-utils
           app=$(ls $PWD/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage)
           bin=$PWD/src-tauri/target/${{ matrix.target }}/release/isoview
-          smoke() {  # smoke NAME WM(yes|no) COMMAND...
-            name=$1; wm=$2; shift 2
+          smoke() {  # smoke NAME COMMAND...
+            name=$1; shift
             xvfb-run -a -s "-ac -screen 0 1600x1000x24" bash -c '
               log=smoke-'$name'.log; : > $log
-              if [ '$wm' = yes ]; then openbox > /dev/null 2>&1 & sleep 2; fi
               env ISOVIEW_SMOKE=1 APPIMAGE_EXTRACT_AND_RUN=1 "$@" >> $log 2>&1 & pid=$!
-              sleep 25
-              { echo "--- windows"; xwininfo -root -tree | grep -v "has no name" | head -30
-                for w in $(xwininfo -root -tree | grep -o "0x[0-9a-f]* \"isoview\"" | grep -o "^0x[0-9a-f]*"); do
-                  echo "window $w:"; xwininfo -id $w | grep -E "Map State|Width|Height"; done
-                echo "--- processes"; ps -eo pid,stat,args | grep -i "[w]ebkit\|[i]soview" | cut -c1-160; } >> $log
+              t=0; until xwininfo -root -tree | grep -q "\"isoview\".* 1400x900+"; do
+                sleep 1; t=$((t+1)); kill -0 $pid || { echo "--- quit after $t s" >> $log; exit 1; }
+                [ $t -ge 120 ] && { echo "--- no window after 120 s" >> $log; import -window root smoke-'$name'.png; exit 1; }; done
+              echo "--- window after $t s" >> $log
+              sleep 20
               import -window root smoke-'$name'.png
-              if kill -0 $pid; then echo "--- running after 25 s" >> $log; kill $pid; exit 0
-              else echo "--- quit" >> $log; exit 1; fi' _ "$@" && r=0 || r=1
-            echo "===== $name"; tail -80 smoke-$name.log; return $r
+              kill -0 $pid && { echo "--- running 20 s later" >> $log; kill $pid; exit 0; }
+              echo "--- quit" >> $log; exit 1' _ "$@" && r=0 || r=1
+            echo "===== $name"; grep -v "^\s*$" smoke-$name.log | tail -40; return $r
           }
-          smoke appimage no "$app" && ok=0 || ok=1
-          smoke binary no "$bin" || true
-          smoke binary-openbox yes "$bin" || true
-          smoke binary-nocompositing no env WEBKIT_DISABLE_COMPOSITING_MODE=1 "$bin" || true
-          smoke binary-nosandbox-debug no env WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 G_MESSAGES_DEBUG=all "$bin" || true
+          smoke appimage "$app" && ok=0 || ok=1
+          smoke binary "$bin" || true
           exit $ok
       - name: Smoke screenshots
         if: runner.os == 'Linux' && always()
