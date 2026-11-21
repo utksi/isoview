@@ -55,27 +55,38 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
             src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-      # Linux: start the AppImage on a virtual display, let it open a sample (ISOVIEW_SMOKE, src-tauri/src/main.rs),
-      # take a screenshot, and fail if the app has quit by then.
+      # Linux: start the app on a virtual display, let it open a sample (ISOVIEW_SMOKE, src-tauri/src/main.rs), list
+      # the X windows and take a screenshot. Three runs: the AppImage, the AppImage with WebKitGTK's DMA-BUF renderer
+      # off, and the bare binary (system WebKitGTK). Fails if the AppImage has quit after 25 s.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y xvfb imagemagick
-          app=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage)
-          ISOVIEW_SMOKE=1 APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1600x1000x24" bash -c "
-            \"$app\" > smoke.log 2>&1 & pid=\$!
-            sleep 25
-            import -window root smoke-linux.png
-            if kill -0 \$pid; then echo 'app still running after 25 s'; kill \$pid; ok=0; else echo 'app quit'; ok=1; fi
-            cat smoke.log; exit \$ok"
-      - name: Smoke screenshot
+          sudo apt-get install -y xvfb imagemagick x11-utils
+          app=$(ls $PWD/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage)
+          bin=$PWD/src-tauri/target/${{ matrix.target }}/release/isoview
+          smoke() {
+            name=$1; shift
+            xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
+              env ISOVIEW_SMOKE=1 APPIMAGE_EXTRACT_AND_RUN=1 "$@" > smoke-'$name'.log 2>&1 & pid=$!
+              sleep 25
+              { echo "--- windows"; xwininfo -root -tree | grep -v "has no name" | head -30; } >> smoke-'$name'.log
+              import -window root smoke-'$name'.png
+              if kill -0 $pid; then echo "--- running after 25 s" >> smoke-'$name'.log; kill $pid; exit 0
+              else echo "--- quit" >> smoke-'$name'.log; exit 1; fi' _ "$@"  && r=0 || r=1
+            echo "===== $name"; cat smoke-$name.log; return $r
+          }
+          smoke appimage "$app" && ok=0 || ok=1
+          smoke appimage-nodmabuf env WEBKIT_DISABLE_DMABUF_RENDERER=1 "$app" || true
+          smoke binary "$bin" || true
+          exit $ok
+      - name: Smoke screenshots
         if: runner.os == 'Linux' && always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-linux
           path: |
-            smoke-linux.png
-            smoke.log
+            smoke-*.png
+            smoke-*.log
 
   release:
     if: startsWith(github.ref, 'refs/tags/app-v')
