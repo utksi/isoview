@@ -5,8 +5,8 @@
  * bonds 36 B = p0, p1 f32x3, rgba u8 x2, radius f32; lines 28 B = p0, p1 f32x3, dashed f32 (0 or 1).
  * Uniform block (60 floats): view (16), proj (16), viewport (4), light (4), accent (4), line (4), look (4), fog (4), bg (4).
  */
-import { WebGPURenderer } from "./webgpu.js?v=20";
-import { WebGL2Renderer } from "./webgl2.js?v=20";
+import { WebGPURenderer } from "./webgpu.js?v=23";
+import { WebGL2Renderer } from "./webgl2.js?v=23";
 
 export async function createRenderer(canvas, onError, force = "") {
   if (force !== "webgl2") {

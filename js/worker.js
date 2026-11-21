@@ -19,11 +19,11 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=20";
-import { isUlm, parseAseTraj } from "./traj.js?v=20";
-import { Wavecar } from "./wavecar.js?v=20";
-import { stats, renderGrid, refine } from "./field.js?v=20";
-import { marchingCubes } from "./gfx/mc.js?v=20";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=23";
+import { isUlm, parseAseTraj } from "./traj.js?v=23";
+import { Wavecar } from "./wavecar.js?v=23";
+import { stats, renderGrid, refine } from "./field.js?v=23";
+import { marchingCubes } from "./gfx/mc.js?v=23";
 
 const DS = new Map();
 let nextDs = 1;
@@ -117,8 +117,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=20").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=20", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=23").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=23", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;
