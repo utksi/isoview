@@ -50,7 +50,7 @@ jobs:
       - run: npm ci
       - name: Build (macOS, Linux)
         if: runner.os != 'Windows'
-        run: npx tauri build --target ${{ matrix.target }}
+        run: npx tauri build --target ${{ matrix.target }} --verbose
       # Windows, in two steps so that the exe inside the installers is signed too (Smart App Control checks it):
       # build the exe; on app-v* tags sign it with SignPath; make the installers around it (--no-binary-patching
       # keeps the signature); on tags sign the installers. Every signing request waits for a manual approval in SignPath.
