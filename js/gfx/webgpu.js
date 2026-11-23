@@ -8,7 +8,7 @@
  * Labels (after the opaque meshes, before translucent ones): 44-byte instances (gfx/labels.js), premultiplied blending,
  * depth test without depth writes; the atlas is an rgba8 texture with a full mip chain made by repeated halving.
  */
-import { WGSL, WGSL_LABEL, QUAD, LINEQ, CYL } from "./shaders.js?v=25";
+import { WGSL, WGSL_LABEL, QUAD, LINEQ, CYL } from "./shaders.js?v=26";
 
 const GPUB = () => globalThis.GPUBufferUsage, GPUS = () => globalThis.GPUShaderStage;
 
