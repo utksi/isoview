@@ -35,8 +35,9 @@ async fn save_file(app: tauri::AppHandle, request: Request<'_>) -> Result<bool, 
 /// Smoke test for CI, run only when the environment variable ISOVIEW_SMOKE is set. Probes, each logged with its
 /// time: fetching a sample file and the worker script directly; a module worker answering a message; then (after
 /// 8 s) the "hydrogen 3d" sample (worker only, no file) and (after 16 s) the "Si model density" sample (file fetch
-/// and worker). Toasts, page errors and every fetch are logged too; after 30 s a box shows the log with the
-/// renderer, the space group and the web APIs present, so a screenshot shows what works.
+/// and worker), shown (after 22 s) in the xkcd look. Toasts, page errors and every fetch are logged too; after
+/// 30 s a box shows the log with the renderer, the space group and the web APIs present, so a screenshot shows what
+/// works.
 const SMOKE_JS: &str = r#"(() => {
   const log = [], t0 = performance.now(), note = m => log.push(((performance.now() - t0) / 1000).toFixed(1) + " s  " + m);
   addEventListener("error", e => note("error: " + e.message));
@@ -57,6 +58,7 @@ const SMOKE_JS: &str = r#"(() => {
   const click = id => { const b = document.querySelector('[data-example="' + id + '"]'); note("click " + id + (b ? "" : " (no button)")); if (b) b.click(); };
   setTimeout(() => click("h3d"), 8000);
   setTimeout(() => { const t = id => ((document.getElementById(id) || {}).textContent || "").trim(); note("after h3d: renderer " + t("gfx") + ", title " + t("doc-name")); click("si"); }, 16000);
+  setTimeout(() => { const b = document.querySelector('.seg[data-key="look"] button[value="xkcd"]'); note("look xkcd" + (b ? "" : " (no button)")); if (b) b.click(); }, 22000);
   setTimeout(() => {
     const t = id => ((document.getElementById(id) || {}).textContent || "").trim();
     const d = document.createElement("pre");
