@@ -6,7 +6,7 @@
  * Labels: drawn after the opaque meshes with premultiplied blending and no depth writes; the atlas texture is
  * uploaded from the canvas with mipmaps (LINEAR_MIPMAP_LINEAR).
  */
-import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=24";
+import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=25";
 
 export class WebGL2Renderer {
   static create(canvas, onError) {

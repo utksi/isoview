@@ -80,7 +80,9 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   share one palette over the whole movie (no flicker) and store only what changed between frames, so they stay small.
   Videos are recorded in real time. **All frames as XYZ** saves the trajectory with the shift and deletions applied.
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
-  and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
+  and outlines), Outline (flat colours with ink lines, like a drawing) and xkcd (hand-drawn comic: wobbly ink outlines
+  that thicken as you zoom in, a shine on every atom, hatched and cross-hatched shadows on surfaces; white ink on the
+  dark theme). Outlines are pixel-exact on atoms and bonds.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   The bar that appears also has **Label all** (every atom drawn) and Clear.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
@@ -124,5 +126,13 @@ use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).
+
+## Credits
+
+The **xkcd** look follows the pen-and-ink drawing rules of the interactive viewer of
+[xkcd-matchem](https://github.com/vzordillo/xkcd-matchem) by the xkcd-matchem contributors (Apache-2.0): the shading and
+shine of atoms, wobbly outlines whose width follows the zoom, and the hatching of surfaces by tone. They are
+re-implemented here as GPU shaders (`js/gfx/shaders.js`); the licence and notice are in `js/gfx/LICENSE.xkcd-matchem`.
+The space group comes from [moyo](https://github.com/spglib/moyo) (MIT or Apache-2.0), vendored in `js/vendor/moyo/`.
 
 MIT licence.
