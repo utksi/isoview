@@ -7,7 +7,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=24">
+<link rel="stylesheet" href="css/style.css?v=25">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -62,7 +62,7 @@
     <summary><span>Structure</span><em id="sum-structure"></em></summary>
     <div class="body">
       <div class="row"><span class="lab">Style</span><div class="seg" data-key="style"><button type="button" value="ball">Ball</button><button type="button" value="space">Space</button><button type="button" value="stick">Stick</button><button type="button" value="off">Off</button></div></div>
-      <div class="row col"><span class="lab">Look</span><div class="seg wide" data-key="look"><button type="button" value="classic" title="Lit spheres with a highlight">Classic</button><button type="button" value="soft" title="Soft light from above and depth fog, as in many papers">Soft</button><button type="button" value="glossy" title="Strong highlights and a bright rim">Glossy</button><button type="button" value="toon" title="Cartoon: three tones, a highlight dot and outlines">Toon</button><button type="button" value="outline" title="Flat colours with ink outlines, like a drawing">Outline</button></div></div>
+      <div class="row col"><span class="lab">Look</span><div class="seg wide" data-key="look"><button type="button" value="classic" title="Lit spheres with a highlight">Classic</button><button type="button" value="soft" title="Soft light from above and depth fog, as in many papers">Soft</button><button type="button" value="glossy" title="Strong highlights and a bright rim">Glossy</button><button type="button" value="toon" title="Cartoon: three tones, a highlight dot and outlines">Toon</button><button type="button" value="outline" title="Flat colours with ink outlines, like a drawing">Outline</button><button type="button" value="xkcd" title="Hand-drawn comic: wobbly ink outlines, a shine on every atom, hatched shadows on surfaces">xkcd</button></div></div>
       <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
       <div class="row col" id="row-species" hidden><span class="lab">Show elements</span><div class="species" id="species"></div></div>
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
@@ -184,6 +184,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=24"></script>
+<script type="module" src="js/app.js?v=25"></script>
 </body>
 </html>

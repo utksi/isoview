@@ -11,9 +11,21 @@
  *   2 glossy   base (0.2 + 0.8 max(d, 0)) + 0.6 h^160 + 0.12 h^16 + 0.15 (1 - n.V)^3
  *   3 toon     base x three bands (0.56, 0.78, 1 at d = 0.15, 0.6) + 0.35 x a highlight disc (h > 0.965)
  *   4 outline  base x (0.88 + 0.12 step(d > -0.25)), i.e. flat colour
+ *   5 xkcd     hand-drawn comic, built from the looks above: the toon bands t(d) = 0.56 + 0.22 smoothstep(0.12, 0.18, d)
+ *              + 0.22 smoothstep(0.57, 0.63, d) as fill, the toon highlight disc in white, ink = #15171b on a light
+ *              background and #eaecef on a dark one (the page's ink colours). Spheres: the silhouette pulled in by
+ *              0.8 (0.5 + 0.35 sin(4 theta + phi) + 0.15 sin(9 theta + 2 phi)) px, theta the angle around the centre, phi
+ *              a per-atom phase; an ink outline of 1.3 clamp(sqrt(r_px / 20 px), 0.8, 1.8) px. Bonds: silhouette pulled
+ *              in by 0.6 (0.5 + 0.5 sin(5 pi h + phi)) px along the bond, 1.3 px of ink. Surfaces: strokes 6 px apart and
+ *              0.8 px wide in ink at 70 %, at +45 deg where d < 0.15 and also at -45 deg where d < -0.25, each stroke
+ *              bent by 0.5 sin(0.06 s + 1.9 k) px (s along the stroke, k its index); an ink rim where n.V < 0.16 +
+ *              0.05 sin(2.5 p.(1.9, 2.3, 1.1)), p the world position. Pixels are CSS px from the top left in both back
+ *              ends.
  * Outline (look.y > 0): colour -> 0.18 base within look.y device pixels of the silhouette. Spheres: the distance to the
  * edge is r_px (1 - sqrt(1 - disc / r^2)), disc of the ray-sphere intersection, r_px the projected radius; bond
- * cylinders: r_px (1 - sqrt(1 - (n.V)^2)); surfaces darken where |n.V| < 0.2. Fog (look.z > 0): mix toward bg by
+ * cylinders: r_px (1 - sqrt(1 - c^2)), c = |n.V| / max(|w x V|, 0.05), w the view-space bond axis (|n.V| alone
+ * would reach only sin(angle(w, V)), so a bond pointing at the eye would be all edge); surfaces darken where
+ * |n.V| < 0.2. Fog (look.z > 0): mix toward bg by
  * look.z clamp((z - fog.x) / (fog.y - fog.x)), z the view depth of the fragment.
  * Spheres: a camera-facing quad of half-size s around the view-space centre c_v (s = r d / sqrt(d^2 - r^2) * d / |z_c|
  * for perspective, which covers the silhouette; s = r for orthographic). The fragment shader intersects the eye ray
@@ -48,13 +60,54 @@ fn shade(base: vec3f, n: vec3f, v: vec3f) -> vec3f {
     let band = 0.56 + 0.22 * smoothstep(0.12, 0.18, d) + 0.22 * smoothstep(0.57, 0.63, d);
     return base * band + vec3f(0.35 * smoothstep(0.955, 0.975, h));
   }
-  return base * (0.88 + 0.12 * smoothstep(-0.3, -0.2, d));
+  if (mode < 4.5) { return base * (0.88 + 0.12 * smoothstep(-0.3, -0.2, d)); }
+  return base;
 }
 fn post(c: vec3f, base: vec3f, edge: f32, z: f32) -> vec3f {
   var o = c;
   if (u.look.y > 0.0) { o = mix(base * 0.18, o, smoothstep(u.look.y - 0.6, u.look.y + 0.6, edge)); }
   if (u.look.z > 0.0) { o = mix(o, u.bg.rgb, u.look.z * clamp((z - u.fog.x) / max(u.fog.y - u.fog.x, 1e-3), 0.0, 1.0)); }
   return o;
+}
+// xkcd look (mode 5): ink colour, toon bands, hatch-stroke coverage, and the sphere / bond / surface colour
+// (alpha 0 = outside the wobbly silhouette, to be discarded)
+fn xink() -> vec3f {
+  if (dot(u.bg.rgb, vec3f(0.299, 0.587, 0.114)) > 0.5) { return vec3f(0.082, 0.09, 0.106); }
+  return vec3f(0.918, 0.925, 0.937);
+}
+fn xtone(d: f32) -> f32 { return 0.56 + 0.22 * smoothstep(0.12, 0.18, d) + 0.22 * smoothstep(0.57, 0.63, d); }
+fn xhatch(q: vec2f, dir: vec2f, sp: f32, lw: f32) -> f32 {
+  let w = dot(q, vec2f(-dir.y, dir.x));
+  let ww = w + 0.5 * sin(dot(q, dir) * 0.06 + floor(w / sp + 0.5) * 1.9);
+  let d = abs(ww - sp * floor(ww / sp + 0.5));
+  return clamp(0.5 * lw + 0.5 - d, 0.0, 1.0);
+}
+fn xsphere(base: vec3f, n: vec3f, v: vec3f, edge: f32, rpx: f32, ph: f32) -> vec4f {
+  let dpr = u.viewport.z;
+  let th = atan2(n.y, n.x);
+  let e = edge - 0.8 * dpr * (0.5 + 0.35 * sin(4.0 * th + ph) + 0.15 * sin(9.0 * th + 2.0 * ph));
+  if (e < 0.0) { return vec4f(0.0); }
+  let L = normalize(u.light.xyz);
+  let h = max(dot(n, normalize(L + v)), 0.0);
+  let c = mix(base * xtone(dot(n, L)), vec3f(1.0), smoothstep(0.955, 0.975, h));
+  let ow = 1.3 * dpr * clamp(sqrt(rpx / (20.0 * dpr)), 0.8, 1.8);
+  return vec4f(mix(xink(), c, smoothstep(ow - 0.6, ow + 0.6, e)), 1.0);
+}
+fn xbond(base: vec3f, n: vec3f, edge: f32, h: f32, ph: f32) -> vec4f {
+  let dpr = u.viewport.z;
+  let e = edge - 0.6 * dpr * (0.5 + 0.5 * sin(15.7079633 * h + ph));
+  if (e < 0.0) { return vec4f(0.0); }
+  let c = base * xtone(dot(n, normalize(u.light.xyz)));
+  return vec4f(mix(xink(), c, smoothstep(1.3 * dpr - 0.6, 1.3 * dpr + 0.6, e)), 1.0);
+}
+fn xmesh(base: vec3f, n: vec3f, v: vec3f, px: vec2f, wp: vec3f) -> vec3f {
+  let d = dot(n, normalize(u.light.xyz));
+  let q = px / u.viewport.z;
+  let h1 = (1.0 - smoothstep(0.1, 0.2, d)) * xhatch(q, vec2f(0.70710678, 0.70710678), 6.0, 0.8);
+  let h2 = (1.0 - smoothstep(-0.3, -0.2, d)) * xhatch(q, vec2f(0.70710678, -0.70710678), 6.0, 0.8);
+  let c = mix(base * xtone(d), xink(), 0.7 * max(h1, h2));
+  let t = 0.16 + 0.05 * sin(dot(wp, vec3f(1.9, 2.3, 1.1)) * 2.5);
+  return mix(c, xink(), 1.0 - smoothstep(t, t + 0.08, dot(n, v)));
 }
 
 struct SV {
@@ -64,6 +117,7 @@ struct SV {
   @location(2) @interpolate(flat) r: f32,
   @location(3) @interpolate(flat) col: vec4f,
   @location(4) @interpolate(flat) rpx: f32,
+  @location(5) @interpolate(flat) ph: f32,
 };
 @vertex fn vs_sphere(@location(0) q: vec2f, @location(1) c: vec3f, @location(2) r: f32, @location(3) col: vec4f) -> SV {
   var o: SV;
@@ -82,6 +136,7 @@ struct SV {
   var ppu = u.proj[1][1] * 0.5 * u.viewport.y;
   if (u.viewport.w < 0.5) { ppu = ppu / max(-vc.z, 1e-6); }
   o.rpx = r * ppu;
+  o.ph = fract(dot(c, vec3f(0.7311, 1.1373, 1.3791))) * 6.2831853;
   return o;
 }
 struct SF { @location(0) color: vec4f, @builtin(frag_depth) depth: f32 };
@@ -107,6 +162,11 @@ struct SF { @location(0) color: vec4f, @builtin(frag_depth) depth: f32 };
   o.depth = clip.z / clip.w;
   let edge = i.rpx * (1.0 - sqrt(max(0.0, 1.0 - disc / (i.r * i.r))));
   o.color = vec4f(post(shade(base, n, -rd), base, edge, -hit.z), 1.0);
+  if (u.look.x > 4.5) {
+    let x = xsphere(base, n, -rd, edge, i.rpx, i.ph);
+    if (x.a < 0.5) { discard; }
+    o.color = x;
+  }
   return o;
 }
 
@@ -118,6 +178,8 @@ struct BV {
   @location(3) @interpolate(flat) c0: vec4f,
   @location(4) @interpolate(flat) c1: vec4f,
   @location(5) rpx: f32,
+  @location(6) @interpolate(flat) ph: f32,
+  @location(7) @interpolate(flat) wv: vec3f,
 };
 @vertex fn vs_bond(@location(0) g: vec3f, @location(1) p0: vec3f, @location(2) p1: vec3f, @location(3) c0: vec4f,
                    @location(4) c1: vec4f, @location(5) r: f32) -> BV {
@@ -139,6 +201,8 @@ struct BV {
   var ppu = u.proj[1][1] * 0.5 * u.viewport.y;
   if (u.viewport.w < 0.5) { ppu = ppu / max(-v4.z, 1e-6); }
   o.rpx = r * ppu;
+  o.ph = fract(dot(p0 + p1, vec3f(0.5113, 0.8731, 1.2177))) * 6.2831853;
+  o.wv = (u.view * vec4f(w, 0.0)).xyz;
   return o;
 }
 @fragment fn fs_bond(i: BV) -> @location(0) vec4f {
@@ -147,8 +211,14 @@ struct BV {
   var v = normalize(-i.vpos);
   if (u.viewport.w > 0.5) { v = vec3f(0.0, 0.0, 1.0); }
   let nn = normalize(i.n);
-  let nv = abs(dot(nn, v));
-  return vec4f(post(shade(base, nn, v), base, i.rpx * (1.0 - sqrt(max(0.0, 1.0 - nv * nv))), -i.vpos.z), 1.0);
+  let nv = min(abs(dot(nn, v)) / max(length(cross(i.wv, v)), 0.05), 1.0);
+  let edge = i.rpx * (1.0 - sqrt(max(0.0, 1.0 - nv * nv)));
+  if (u.look.x > 4.5) {
+    let x = xbond(base, nn, edge, i.h, i.ph);
+    if (x.a < 0.5) { discard; }
+    return x;
+  }
+  return vec4f(post(shade(base, nn, v), base, edge, -i.vpos.z), 1.0);
 }
 
 struct LV {
@@ -182,6 +252,7 @@ struct MV {
   @builtin(position) @invariant pos: vec4f,
   @location(0) n: vec3f,
   @location(1) vpos: vec3f,
+  @location(2) wp: vec3f,
 };
 @vertex fn vs_mesh(@location(0) p: vec3f, @location(1) n: vec4f) -> MV {
   var o: MV;
@@ -189,6 +260,7 @@ struct MV {
   o.pos = u.proj * v4;
   o.vpos = v4.xyz;
   o.n = (u.view * vec4f(n.xyz, 0.0)).xyz;
+  o.wp = p;
   return o;
 }
 @fragment fn fs_mesh(i: MV) -> @location(0) vec4f {
@@ -198,6 +270,7 @@ struct MV {
   if (dot(n, v) < 0.0) { n = -n; }
   var c = shade(m.color.rgb, n, v);
   if (u.look.y > 0.0) { c = mix(m.color.rgb * 0.18, c, smoothstep(0.1, 0.22, dot(n, v))); }
+  if (u.look.x > 4.5) { c = xmesh(m.color.rgb, n, v, i.pos.xy, i.wp); }
   return vec4f(post(c, m.color.rgb, 1e4, -i.vpos.z), m.color.a);
 }
 @fragment fn fs_depth(i: MV) -> @location(0) vec4f {
@@ -226,13 +299,49 @@ vec3 shade(vec3 base, vec3 n, vec3 v) {
     float band = 0.56 + 0.22 * smoothstep(0.12, 0.18, d) + 0.22 * smoothstep(0.57, 0.63, d);
     return base * band + vec3(0.35 * smoothstep(0.955, 0.975, h));
   }
-  return base * (0.88 + 0.12 * smoothstep(-0.3, -0.2, d));
+  if (mode < 4.5) return base * (0.88 + 0.12 * smoothstep(-0.3, -0.2, d));
+  return base;
 }
 vec3 post(vec3 c, vec3 base, float edge, float z) {
   vec3 o = c;
   if (look.y > 0.0) o = mix(base * 0.18, o, smoothstep(look.y - 0.6, look.y + 0.6, edge));
   if (look.z > 0.0) o = mix(o, bg.rgb, look.z * clamp((z - fog.x) / max(fog.y - fog.x, 1e-3), 0.0, 1.0));
   return o;
+}
+vec3 xink() { return dot(bg.rgb, vec3(0.299, 0.587, 0.114)) > 0.5 ? vec3(0.082, 0.09, 0.106) : vec3(0.918, 0.925, 0.937); }
+float xtone(float d) { return 0.56 + 0.22 * smoothstep(0.12, 0.18, d) + 0.22 * smoothstep(0.57, 0.63, d); }
+float xhatch(vec2 q, vec2 dir, float sp, float lw) {
+  float w = dot(q, vec2(-dir.y, dir.x));
+  float ww = w + 0.5 * sin(dot(q, dir) * 0.06 + floor(w / sp + 0.5) * 1.9);
+  float d = abs(ww - sp * floor(ww / sp + 0.5));
+  return clamp(0.5 * lw + 0.5 - d, 0.0, 1.0);
+}
+vec4 xsphere(vec3 base, vec3 n, vec3 v, float edge, float rpx, float ph) {
+  float dpr = viewport.z;
+  float th = atan(n.y, n.x);
+  float e = edge - 0.8 * dpr * (0.5 + 0.35 * sin(4.0 * th + ph) + 0.15 * sin(9.0 * th + 2.0 * ph));
+  if (e < 0.0) return vec4(0.0);
+  vec3 L = normalize(light.xyz);
+  float h = max(dot(n, normalize(L + v)), 0.0);
+  vec3 c = mix(base * xtone(dot(n, L)), vec3(1.0), smoothstep(0.955, 0.975, h));
+  float ow = 1.3 * dpr * clamp(sqrt(rpx / (20.0 * dpr)), 0.8, 1.8);
+  return vec4(mix(xink(), c, smoothstep(ow - 0.6, ow + 0.6, e)), 1.0);
+}
+vec4 xbond(vec3 base, vec3 n, float edge, float h, float ph) {
+  float dpr = viewport.z;
+  float e = edge - 0.6 * dpr * (0.5 + 0.5 * sin(15.7079633 * h + ph));
+  if (e < 0.0) return vec4(0.0);
+  vec3 c = base * xtone(dot(n, normalize(light.xyz)));
+  return vec4(mix(xink(), c, smoothstep(1.3 * dpr - 0.6, 1.3 * dpr + 0.6, e)), 1.0);
+}
+vec3 xmesh(vec3 base, vec3 n, vec3 v, vec2 px, vec3 wp) {
+  float d = dot(n, normalize(light.xyz));
+  vec2 q = px / viewport.z;
+  float h1 = (1.0 - smoothstep(0.1, 0.2, d)) * xhatch(q, vec2(0.70710678, 0.70710678), 6.0, 0.8);
+  float h2 = (1.0 - smoothstep(-0.3, -0.2, d)) * xhatch(q, vec2(0.70710678, -0.70710678), 6.0, 0.8);
+  vec3 c = mix(base * xtone(d), xink(), 0.7 * max(h1, h2));
+  float t = 0.16 + 0.05 * sin(dot(wp, vec3(1.9, 2.3, 1.1)) * 2.5);
+  return mix(c, xink(), 1.0 - smoothstep(t, t + 0.08, dot(n, v)));
 }
 `;
 
@@ -247,8 +356,10 @@ flat out vec3 vc;
 flat out float rr;
 flat out vec4 vcol;
 flat out float rpx;
+flat out float vph;
 void main() {
   vec3 cv = (view * vec4(c, 1.0)).xyz;
+  vph = fract(dot(c, vec3(0.7311, 1.1373, 1.3791))) * 6.2831853;
   float s = r * 1.02;
   if (viewport.w < 0.5) {
     float d = length(cv);
@@ -266,6 +377,7 @@ flat in vec3 vc;
 flat in float rr;
 flat in vec4 vcol;
 flat in float rpx;
+flat in float vph;
 out vec4 outColor;
 void main() {
   vec3 ro = vec3(0.0);
@@ -285,6 +397,11 @@ void main() {
   if (vcol.a < 0.75 && n.z < accent.w) base = accent.rgb;
   float edge = rpx * (1.0 - sqrt(max(0.0, 1.0 - disc / (rr * rr))));
   outColor = vec4(post(shade(base, n, -rd), base, edge, -hit.z), 1.0);
+  if (look.x > 4.5) {
+    vec4 x = xsphere(base, n, -rd, edge, rpx, vph);
+    if (x.a < 0.5) discard;
+    outColor = x;
+  }
 }`],
   bond: [GL_HEAD + `
 layout(location = 0) in vec3 g;
@@ -299,9 +416,13 @@ out vec3 vpos;
 flat out vec4 fc0;
 flat out vec4 fc1;
 out float rpx;
+flat out float vph;
+flat out vec3 fwv;
 void main() {
   vec3 ax = p1 - p0;
+  vph = fract(dot(p0 + p1, vec3(0.5113, 0.8731, 1.2177))) * 6.2831853;
   vec3 w = ax / max(length(ax), 1e-6);
+  fwv = (view * vec4(w, 0.0)).xyz;
   vec3 a = abs(w.x) > 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
   vec3 e1 = normalize(cross(w, a));
   vec3 e2 = cross(w, e1);
@@ -321,13 +442,22 @@ in vec3 vpos;
 flat in vec4 fc0;
 flat in vec4 fc1;
 in float rpx;
+flat in float vph;
+flat in vec3 fwv;
 out vec4 outColor;
 void main() {
   vec3 base = hh > 0.5 ? fc1.rgb : fc0.rgb;
   vec3 v = viewport.w > 0.5 ? vec3(0.0, 0.0, 1.0) : normalize(-vpos);
   vec3 n = normalize(nn);
-  float nv = abs(dot(n, v));
-  outColor = vec4(post(shade(base, n, v), base, rpx * (1.0 - sqrt(max(0.0, 1.0 - nv * nv))), -vpos.z), 1.0);
+  float nv = min(abs(dot(n, v)) / max(length(cross(fwv, v)), 0.05), 1.0);
+  float edge = rpx * (1.0 - sqrt(max(0.0, 1.0 - nv * nv)));
+  if (look.x > 4.5) {
+    vec4 x = xbond(base, n, edge, hh, vph);
+    if (x.a < 0.5) discard;
+    outColor = x;
+    return;
+  }
+  outColor = vec4(post(shade(base, n, v), base, edge, -vpos.z), 1.0);
 }`],
   line: [GL_HEAD + `
 layout(location = 0) in vec2 g;
@@ -362,16 +492,19 @@ layout(location = 0) in vec3 p;
 layout(location = 1) in vec4 n;
 out vec3 nn;
 out vec3 vpos;
+out vec3 wp;
 invariant gl_Position;
 void main() {
   vec4 v4 = view * vec4(p, 1.0);
   gl_Position = proj * v4;
   vpos = v4.xyz;
   nn = (view * vec4(n.xyz, 0.0)).xyz;
+  wp = p;
 }`, GL_HEAD + `
 uniform vec4 meshColor;
 in vec3 nn;
 in vec3 vpos;
+in vec3 wp;
 out vec4 outColor;
 void main() {
   vec3 n = normalize(nn);
@@ -379,6 +512,8 @@ void main() {
   if (dot(n, v) < 0.0) n = -n;
   vec3 c = shade(meshColor.rgb, n, v);
   if (look.y > 0.0) c = mix(meshColor.rgb * 0.18, c, smoothstep(0.1, 0.22, dot(n, v)));
+  // WHY: gl_FragCoord counts from the bottom left; WGSL's position from the top left. Flip so hatching matches.
+  if (look.x > 4.5) c = xmesh(meshColor.rgb, n, v, vec2(gl_FragCoord.x, viewport.y - gl_FragCoord.y), wp);
   outColor = vec4(post(c, meshColor.rgb, 1e4, -vpos.z), meshColor.a);
 }`],
 };

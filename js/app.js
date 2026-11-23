@@ -20,22 +20,22 @@
  * S.step frames every 1 / S.fps seconds (loop, bounce or stop at the end). Movies render each chosen frame into a
  * canvas: GIF (gif.js) with delays of 100 / fps centiseconds, the remainder carried; video via MediaRecorder, frames
  * pushed at 1 / fps second intervals.
- * Looks (LOOKS, shaders.js): lighting mode, outline width and depth fog sent as uniforms; fog runs over the view depths
+ * Looks (LOOKS, shaders.js): lighting mode, outline width and depth fog sent as uniforms (xkcd draws its own ink); fog runs over the view depths
  * of the scene's bounding sphere, cam.dist -+ cam.radius.
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=24";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=24";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=24";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=24";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=24";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=24";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=24";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=24";
-import { measureAll } from "./measure.js?v=24";
-import { GifWriter, buildPalette } from "./gif.js?v=24";
-import * as store from "./store.js?v=24";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=25";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=25";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=25";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=25";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=25";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=25";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=25";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=25";
+import { measureAll } from "./measure.js?v=25";
+import { GifWriter, buildPalette } from "./gif.js?v=25";
+import * as store from "./store.js?v=25";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -58,7 +58,7 @@ const S = {
 };
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
-const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
+const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0], xkcd: [5, 0, 0] };
 let nextItem = 1, nextLayer = 1;
 const cam = new Camera();
 let R = null, canvas = $("gl"), pal = {}, disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
@@ -112,7 +112,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=24", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=25", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1437,7 +1437,7 @@ const OPTIONS = [
   { t: "Shift origin", sel: "#fx", k: "shift translate move origin fractional offset wrap" },
   { t: "Undo", sel: "#e-undo", k: "undo revert back ctrl z" },
   { t: "Style", sel: '.seg[data-key="style"]', k: "ball stick space filling spacefill hide atoms representation" },
-  { t: "Look", sel: '.seg[data-key="look"]', k: "look toon cartoon glossy soft outline fog shading render style paper" },
+  { t: "Look", sel: '.seg[data-key="look"]', k: "look toon cartoon glossy soft outline fog shading render style paper xkcd comic sketch hand drawn pen ink hatching crosshatch wobbly" },
   { t: "Atom size", sel: "#scale", k: "size radius scale atoms" },
   { t: "Bonds", sel: "#bonds", k: "bonds on off" },
   { t: "Bond reach", sel: "#tol", k: "bond length cutoff distance bonding reach keep" },
