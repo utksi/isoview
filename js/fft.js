@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Complex discrete Fourier transforms on separate real/imaginary Float64Arrays.
  *

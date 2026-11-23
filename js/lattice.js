@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Lattice algebra. A lattice is a 3x3 array of row vectors a, b, c in Angstrom; Cartesian r = f0 a + f1 b + f2 c for
  * fractional coordinates f. Angles are in degrees.

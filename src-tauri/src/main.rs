@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 //! isoview desktop app: a native window (Tauri 2, the system webview) that serves the isoview site from files
 //! embedded in the binary (../dist, staged from the repo by tools/stage-desktop.mjs), so it runs offline. All
 //! parsing, orbitals, meshing and drawing stay in the page's JavaScript, WebAssembly, WebGPU or WebGL2, as on the web.

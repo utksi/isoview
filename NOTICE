@@ -1,0 +1,16 @@
+isoview
+Copyright 2026 Utkarsh Singh (https://github.com/utksi)
+https://utkarsh.science/isoview/
+
+This product includes software from other projects, under their own licences:
+
+- moyo (https://github.com/spglib/moyo), by the spglib developers: its WebAssembly
+  build, in js/vendor/moyo/. MIT or Apache-2.0; the licence texts are in that folder.
+
+- 3Dmol.js (https://3dmol.org): the marching-cubes case tables in js/gfx/mctables.js.
+  Copyright (c) 2014, University of Pittsburgh and contributors. BSD-3-Clause; the
+  licence text is in js/gfx/LICENSE-3Dmol.txt.
+
+The sample files listed under "From real calculations" in examples/README.md are
+third-party data, not covered by the Apache License; their licences (MIT, GPL-2.0)
+are in examples/LICENSES/.

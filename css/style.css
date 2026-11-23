@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0. Copyright 2026 Utkarsh Singh. */
 /* isoview: a full-bleed viewer with one quiet panel of collapsible sections and small corner controls.
    Each corner group (title, panel, axes and cell, view buttons) has an eye at the very corner that tucks it away.
    Nothing scrolls sideways: rows shrink and wrap inside the panel width. */

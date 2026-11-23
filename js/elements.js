@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Element data: symbols (Z = 0..103, Z = 0 is the unknown "X"), covalent radii and display colours.
  *

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * VASP WAVECAR reader: band energies, occupations and real-space orbital densities, read lazily from a File.
  *
@@ -21,8 +23,8 @@
  * electron over the cell (1/A^3); the signed Gamma-only orbital to int psi^2 dV = 1 (A^-3/2). Only the smooth
  * part of the PAW orbital is available (no augmentation inside the spheres).
  */
-import { fft3, nextPow2 } from "./fft.js?v=26";
-import { det3, inv3 } from "./lattice.js?v=26";
+import { fft3, nextPow2 } from "./fft.js?v=27";
+import { det3, inv3 } from "./lattice.js?v=27";
 
 const C = 0.262465831;
 

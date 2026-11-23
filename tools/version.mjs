@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Set the deploy version N in every URL a browser caches: the stylesheet and app.js in index.html, every relative
  * module import in js/ (the page and the worker alike: a module worker does not use the page's import map) and the

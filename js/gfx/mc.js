@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Marching cubes on a regular grid (runs in the worker).
  *
@@ -12,7 +14,7 @@
  * Output { positions: Float32Array(3V), normals: Int16Array(4V) (snorm16 x, y, z, 0), indices: Uint32Array(3T),
  * truncated } with at most maxTris triangles.
  */
-import { EDGE, COUNT, TRI } from "./mctables.js?v=26";
+import { EDGE, COUNT, TRI } from "./mctables.js?v=27";
 
 /** Growable typed array. */
 class Buf {

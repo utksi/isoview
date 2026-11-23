@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Trajectory readers: files holding a sequence of structures of the same atoms (molecular dynamics, relaxations,
  * NEB images, animations). Every reader returns a dataset shaped like those of formats.js,
@@ -14,9 +16,9 @@
  * or alat and Ry; CASTEP .md/.geom in Bohr and Hartree; GROMACS .gro in nm. Conversions: BOHR = 0.529177210903 A,
  * Ry = 13.605693122994 eV, Ha = 2 Ry, nm = 10 A.
  */
-import { Cursor, tokens } from "./numbers.js?v=26";
-import { elementOf, SYMBOLS } from "./elements.js?v=26";
-import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=26";
+import { Cursor, tokens } from "./numbers.js?v=27";
+import { elementOf, SYMBOLS } from "./elements.js?v=27";
+import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=27";
 
 const RY = 13.605693122994; // eV
 const HA = 2 * RY; // eV

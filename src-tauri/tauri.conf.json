@@ -29,8 +29,8 @@
     "active": true,
     "targets": "all",
     "publisher": "Utkarsh Singh",
-    "copyright": "Copyright (c) 2026 Utkarsh Singh. MIT licence.",
-    "license": "MIT",
+    "copyright": "Copyright 2026 Utkarsh Singh. Apache License 2.0.",
+    "license": "Apache-2.0",
     "shortDescription": "Crystal structures, volumetric data, orbitals and trajectories",
     "longDescription": "isoview opens crystal structures, volumetric data (CHGCAR, LOCPOT, ELFCAR, cube, XSF), VASP WAVECAR orbitals and trajectories, and lets you measure, edit and export them. Everything stays on your computer.",
     "icon": [

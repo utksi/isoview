@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Compute worker: file parsing, WAVECAR orbitals and marching cubes, off the main thread. The large arrays (field
  * values, the WAVECAR reader) stay here; the page gets metadata, statistics (stats() of field.js, for the level
@@ -19,11 +21,11 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=26";
-import { isUlm, parseAseTraj } from "./traj.js?v=26";
-import { Wavecar } from "./wavecar.js?v=26";
-import { stats, renderGrid, refine } from "./field.js?v=26";
-import { marchingCubes } from "./gfx/mc.js?v=26";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=27";
+import { isUlm, parseAseTraj } from "./traj.js?v=27";
+import { Wavecar } from "./wavecar.js?v=27";
+import { stats, renderGrid, refine } from "./field.js?v=27";
+import { marchingCubes } from "./gfx/mc.js?v=27";
 
 const DS = new Map();
 let nextDs = 1;
@@ -117,8 +119,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=26").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=26", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=27").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=27", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;

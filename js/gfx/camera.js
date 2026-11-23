@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Orbit camera: unit quaternion q (world -> view rotation), target point, distance, vertical field of view.
  *
