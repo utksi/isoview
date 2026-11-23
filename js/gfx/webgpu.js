@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * WebGPU back end: one render pass per frame, 4x MSAA resolved into the canvas.
  * Order: opaque spheres, bonds, lines, opaque meshes; then each translucent mesh twice, a depth-only pass (colour
@@ -8,7 +10,7 @@
  * Labels (after the opaque meshes, before translucent ones): 44-byte instances (gfx/labels.js), premultiplied blending,
  * depth test without depth writes; the atlas is an rgba8 texture with a full mip chain made by repeated halving.
  */
-import { WGSL, WGSL_LABEL, QUAD, LINEQ, CYL } from "./shaders.js?v=26";
+import { WGSL, WGSL_LABEL, QUAD, LINEQ, CYL } from "./shaders.js?v=27";
 
 const GPUB = () => globalThis.GPUBufferUsage, GPUS = () => globalThis.GPUShaderStage;
 

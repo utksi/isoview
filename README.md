@@ -123,6 +123,12 @@ every module import and the worker, so browsers never mix cached old modules wit
 use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
-table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause).
+table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause, licence text in
+`js/gfx/LICENSE-3Dmol.txt`).
 
-MIT licence.
+## Licence
+
+Copyright 2026 Utkarsh Singh. isoview is licensed under the [Apache License 2.0](LICENSE): you may use, change and
+share it, also commercially. Copies and works built on it must keep the licence and the [`NOTICE`](NOTICE) file and
+say which files were changed. The licence gives no right to use the name isoview for them. Third-party parts (moyo,
+the 3Dmol.js tables, the sample files from real calculations) keep their own licences, listed in `NOTICE`.

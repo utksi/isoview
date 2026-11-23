@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Geometry of a selection of 2 to 4 atoms (Cartesian positions in A).
  *   distance  |b - a|

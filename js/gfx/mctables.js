@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+// Copyright 2026 Utkarsh Singh; case tables Copyright (c) 2014, University of Pittsburgh and contributors (3Dmol.js, see LICENSE-3Dmol.txt)
 /**
  * Marching-cubes case tables (the classic Lorensen-Cline / Bourke triangulation, as shipped in 3Dmol.js, BSD-3-Clause).
  * Case index c = sum over the 8 cube corners (x, y, z) in {0,1}^3 with value < iso of 2^(x + 2y + 4z).

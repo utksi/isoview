@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * The last scene, kept in this browser so that a reload brings it back. Nothing leaves the device.
  *

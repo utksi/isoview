@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * WebGL2 back end with the same interface and draw order as webgpu.js (opaque spheres, bonds, lines, opaque meshes;
  * translucent meshes as a depth-only pass then a blended pass with LEQUAL and no depth writes). Multisampling comes
@@ -6,7 +8,7 @@
  * Labels: drawn after the opaque meshes with premultiplied blending and no depth writes; the atlas texture is
  * uploaded from the canvas with mipmaps (LINEAR_MIPMAP_LINEAR).
  */
-import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=26";
+import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=27";
 
 export class WebGL2Renderer {
   static create(canvas, onError) {

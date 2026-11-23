@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Tests of the file readers and numerics (node tests/run.mjs). Each check states the exact or physical value it
  * expects. Optional checks on real VASP output run when the paths are given in the environment:

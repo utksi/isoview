@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Utkarsh Singh
 /**
  * Shaders, WGSL (WebGPU) and GLSL ES 3.00 (WebGL2), with the same inputs and the same arithmetic.
  *

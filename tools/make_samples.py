@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Utkarsh Singh
 """Write the sample files offered on isoview's opening page (examples/), from model structures and short EMT runs.
 
 Structures: textbook cells and ASE's molecule set, written with ase.io (POSCAR, XSF, FHI-aims, xyz, PDB).
