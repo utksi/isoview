@@ -144,12 +144,4 @@ To build one yourself you need Node and Rust, plus WebKitGTK on Linux (see Tauri
 `npx tauri dev` for a window that runs from your checkout). `tools/stage-desktop.mjs` copies the site into `dist/`
 for the app; `src-tauri/` holds the Rust side.
 
-## Credits
-
-The **xkcd** look follows the pen-and-ink drawing rules of the interactive viewer of
-[xkcd-matchem](https://github.com/vzordillo/xkcd-matchem) by the xkcd-matchem contributors (Apache-2.0): the shading and
-shine of atoms, wobbly outlines whose width follows the zoom, and the hatching of surfaces by tone. They are
-re-implemented here as GPU shaders (`js/gfx/shaders.js`); the licence and notice are in `js/gfx/LICENSE.xkcd-matchem`.
-The space group comes from [moyo](https://github.com/spglib/moyo) (MIT or Apache-2.0), vendored in `js/vendor/moyo/`.
-
 MIT licence.
