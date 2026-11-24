@@ -3,7 +3,7 @@
    Each corner group (title, panel, axes and cell, view buttons) has an eye at the very corner that tucks it away.
    Nothing scrolls sideways: rows shrink and wrap inside the panel width. */
 :root {
-  --bg: #f4f5f7; --solid: #ffffff; --panel: rgba(255, 255, 255, 0.8); --ink: #15171b; --ink2: #5c626c; --ink3: #949aa4;
+  --bg: #f4f5f7; --solid: #ffffff; --panel: rgba(255, 255, 255, 0.8); --ink: #15171b; --ink2: #484d56; --ink3: #676d77;
   --line: rgba(17, 20, 26, 0.09); --line2: rgba(17, 20, 26, 0.18); --hover: rgba(17, 20, 26, 0.045);
   --accent: #3058d0; --accent-soft: rgba(48, 88, 208, 0.1); --pos: #e09a2d; --neg: #3a80c9; --cell: #8b919b;
   --ax-a: #cf574c; --ax-b: #3e9a59; --ax-c: #3d6fd1; --err: #c2413a; --sec-open: rgba(48, 88, 208, 0.045);
@@ -14,7 +14,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1013; --solid: #1d1f24; --panel: rgba(27, 29, 34, 0.76); --ink: #eaecef; --ink2: #a5abb5; --ink3: #6e7581;
+    --bg: #0f1013; --solid: #1d1f24; --panel: rgba(27, 29, 34, 0.76); --ink: #eaecef; --ink2: #b9bec7; --ink3: #878e99;
     --line: rgba(255, 255, 255, 0.08); --line2: rgba(255, 255, 255, 0.18); --hover: rgba(255, 255, 255, 0.05);
     --accent: #8ea8ff; --accent-soft: rgba(142, 168, 255, 0.14); --pos: #efaa44; --neg: #5aa2ea; --cell: #6f7682;
     --ax-a: #e57a70; --ax-b: #6cc488; --ax-c: #7d9df0; --err: #f08a80; --sec-open: rgba(142, 168, 255, 0.06);
@@ -22,7 +22,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1013; --solid: #1d1f24; --panel: rgba(27, 29, 34, 0.76); --ink: #eaecef; --ink2: #a5abb5; --ink3: #6e7581;
+  --bg: #0f1013; --solid: #1d1f24; --panel: rgba(27, 29, 34, 0.76); --ink: #eaecef; --ink2: #b9bec7; --ink3: #878e99;
   --line: rgba(255, 255, 255, 0.08); --line2: rgba(255, 255, 255, 0.18); --hover: rgba(255, 255, 255, 0.05);
   --accent: #8ea8ff; --accent-soft: rgba(142, 168, 255, 0.14); --pos: #efaa44; --neg: #5aa2ea; --cell: #6f7682;
   --ax-a: #e57a70; --ax-b: #6cc488; --ax-c: #7d9df0; --err: #f08a80; --sec-open: rgba(142, 168, 255, 0.06);
@@ -31,7 +31,7 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; overflow: hidden; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
 [hidden] { display: none !important; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }

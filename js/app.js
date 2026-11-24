@@ -46,23 +46,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=31";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=31";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=31";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=31";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=31";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=31";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=31";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=31";
-import { measureAll } from "./measure.js?v=31";
-import { GifWriter, buildPalette } from "./gif.js?v=31";
-import * as store from "./store.js?v=31";
-import { contours, scaler, paint, lut } from "./slice.js?v=31";
-import { chart, toCSV } from "./plot.js?v=31";
-import { openPicker } from "./picker.js?v=31";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=31";
-import { colormap } from "./slice.js?v=31";
-import { wignerSeitz, kpath } from "./bz.js?v=31";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=32";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=32";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=32";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=32";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=32";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=32";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=32";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=32";
+import { measureAll } from "./measure.js?v=32";
+import { GifWriter, buildPalette } from "./gif.js?v=32";
+import * as store from "./store.js?v=32";
+import { contours, scaler, paint, lut } from "./slice.js?v=32";
+import { chart, toCSV } from "./plot.js?v=32";
+import { openPicker } from "./picker.js?v=32";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=32";
+import { colormap } from "./slice.js?v=32";
+import { wignerSeitz, kpath } from "./bz.js?v=32";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -145,7 +145,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=31", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=32", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1911,7 +1911,7 @@ function setBZ(on) {
 function buildBZ() {
   const { k, zone } = S.bzData, V = zone.vertices;
   const kmax = Math.max(...V.map(v => norm(v))), sc = BZ_SIZE / kmax, P = v => v.map(x => x * sc);
-  const accent = css("--accent") || "#3058d0", ink = css("--ink2") || "#5c626c", ax = ["--ax-a", "--ax-b", "--ax-c"].map(css);
+  const accent = css("--accent") || "#3058d0", ink = css("--ink2") || "#484d56", ax = ["--ax-a", "--ax-b", "--ax-c"].map(css);
   const segs = zone.edges.map(([i, j]) => ({ p0: P(V[i]), p1: P(V[j]), dashed: false }));
   const bonds = [], pts = [], labels = [];
   for (const run of k.path) for (let i = 0; i + 1 < run.length; i++) bonds.push({ p0: P(k.points[run[i]]), p1: P(k.points[run[i + 1]]), c0: accent, c1: accent, r: 0.035 * BZ_SIZE });
