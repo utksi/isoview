@@ -7,8 +7,10 @@
  * cylinder and line geometry are ordinary attributes. Uniforms: one std140 uniform block "U" at binding 0.
  * Labels: drawn after the opaque meshes with premultiplied blending and no depth writes; the atlas texture is
  * uploaded from the canvas with mipmaps (LINEAR_MIPMAP_LINEAR).
+ * Slice plane (setSlice): drawn after the labels and before the translucent meshes, depth-tested and depth-writing,
+ * premultiplied blending; its image is uploaded premultiplied with mipmaps.
  */
-import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=27";
+import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=28";
 
 export class WebGL2Renderer {
   static create(canvas, onError) {
@@ -38,6 +40,8 @@ export class WebGL2Renderer {
     this.uMeshColor = gl.getUniformLocation(this.pMesh, "meshColor");
     this.pLabel = prog("label", GLSL.label);
     this.uAtlas = gl.getUniformLocation(this.pLabel, "atlas");
+    this.pSlice = prog("slice", GLSL.slice);
+    this.uSliceTex = gl.getUniformLocation(this.pSlice, "tex");
     this.ubo = gl.createBuffer();
     gl.bindBuffer(gl.UNIFORM_BUFFER, this.ubo); gl.bufferData(gl.UNIFORM_BUFFER, 240, gl.DYNAMIC_DRAW);
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
@@ -50,6 +54,7 @@ export class WebGL2Renderer {
     this.lines = this.slot(this.lineq, [[0, 2, F, false, 8, 0, 0]], [[1, 3, F, false, 28, 0, 1], [2, 3, F, false, 28, 12, 1], [3, 1, F, false, 28, 24, 1]]);
     this.labels = this.slot(this.quad, [[0, 2, F, false, 8, 0, 0]], [[1, 3, F, false, 44, 0, 1], [2, 1, F, false, 44, 12, 1], [3, 4, F, false, 44, 16, 1],
       [4, 1, F, false, 44, 32, 1], [5, 4, UB, true, 44, 36, 1], [6, 4, UB, true, 44, 40, 1]]);
+    this.slice = this.slot(this.quad, [[0, 2, F, false, 8, 0, 0]], [[1, 3, F, false, 40, 0, 1], [2, 3, F, false, 40, 12, 1], [3, 3, F, false, 40, 24, 1], [4, 1, F, false, 40, 36, 1]]);
     this.meshes = []; this.groups = new Map();
     this.bg = [1, 1, 1];
   }
@@ -112,6 +117,22 @@ export class WebGL2Renderer {
     const g = this.groups.get(key);
     if (g) g.forEach((m, i) => { if (list[i]) { m.color = list[i].color; m.opacity = list[i].opacity; } });
   }
+  /** Slice plane: { o, U, V (A), alpha, image: a canvas (new image) or null (keep the last one) }, or null to hide it. */
+  setSlice(sl) {
+    const gl = this.gl;
+    if (!sl) { this.slice.n = 0; return; }
+    this.upload(this.slice, new Float32Array([...sl.o, ...sl.U, ...sl.V, sl.alpha]), 1);
+    if (!sl.image) return;
+    if (!this.sliceTex) this.sliceTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.sliceTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sl.image);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
   clearMeshes() { for (const k of [...this.groups.keys()]) this.removeMeshGroup(k); }
   setBackground(rgb) { this.bg = rgb; }
 
@@ -136,6 +157,12 @@ export class WebGL2Renderer {
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
       gl.bindVertexArray(this.labels.vao); gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.labels.n);
       gl.depthMask(true); gl.disable(gl.BLEND); gl.useProgram(this.pMesh);
+    }
+    if (this.slice.n && this.sliceTex) {
+      gl.useProgram(this.pSlice); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.sliceTex); gl.uniform1i(this.uSliceTex, 0);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindVertexArray(this.slice.vao); gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, 1);
+      gl.disable(gl.BLEND); gl.useProgram(this.pMesh);
     }
     for (const m of this.meshes) if (m.opacity < 0.999) {
       gl.colorMask(false, false, false, false); gl.depthMask(true); gl.depthFunc(gl.LESS); gl.disable(gl.BLEND);

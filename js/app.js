@@ -26,22 +26,35 @@
  * of the scene's bounding sphere, cam.dist -+ cam.radius.
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
+ * Embedded (?embed, in an iframe on a website or in a notebook): see initEmbed; nothing is kept in this browser.
+ * Slice (SL): a 2D cut through the active field on the (hkl) plane at position t of its cell (supercell for periodic
+ * fields), sampled in the worker (slice.js), drawn as a textured plane in the scene and in the slice window with
+ * contour lines, the atoms within SL_NEAR of the plane and a colour bar; saved as PNG or SVG.
+ * Trajectory analysis (AN): RDF, MSD with diffusion coefficients, VDOS and per-frame series of the main trajectory
+ * (analysis.js, run in the worker on the atoms still present), plotted by plot.js; saved as CSV or SVG.
+ * Brillouin zone (S.bz): the view shows the first Brillouin zone of the active structure (bz.js: Wigner-Seitz cell of
+ * the reciprocal lattice, Setyawan-Curtarolo points and path) instead of the scene, scaled by BZ_SIZE / max |k|;
+ * the crystal view (camera included) comes back when it is switched off.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=27";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=27";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=27";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=27";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=27";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=27";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=27";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=27";
-import { measureAll } from "./measure.js?v=27";
-import { GifWriter, buildPalette } from "./gif.js?v=27";
-import * as store from "./store.js?v=27";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=28";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=28";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=28";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=28";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=28";
+import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=28";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=28";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=28";
+import { measureAll } from "./measure.js?v=28";
+import { GifWriter, buildPalette } from "./gif.js?v=28";
+import * as store from "./store.js?v=28";
+import { contours, scaler, paint, lut } from "./slice.js?v=28";
+import { lineChart, toCSV } from "./plot.js?v=28";
+import { wignerSeitz, kpath } from "./bz.js?v=28";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const qp = new URLSearchParams(location.search);
+const EMBED = qp.has("embed"); // inside an iframe on another page (initEmbed)
 // colour pairs (positive, negative) for successive field layers: mid-tones readable on light and dark backgrounds
 const FIELD_COLORS = [["#e3a03a", "#3b86d6"], ["#2bb3a3", "#e0607e"], ["#9b7be0", "#7cb342"], ["#ef7d4b", "#5c9bd6"]];
 // spin channels (a band of a spin-polarised WAVECAR, a CHGCAR's spin up / spin down): up warm, down cool;
@@ -114,7 +127,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=27", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=28", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -188,6 +201,7 @@ function remap(list, atoms) {
 }
 function buildStructure() {
   if (!R) return;
+  if (S.bz) { buildBZ(); return; }
   const atoms = [], bonds = [], segs = [];
   if (S.style !== "off") for (const L of atomLayers()) {
     const st = itemOf(L).structure, reps = st.pbc ? S.reps : [1, 1, 1];
@@ -246,13 +260,14 @@ function speciesUI() {
     `<span class="dot" style="background:${colorOf(e)}"></span>${esc(e)}<em>${count.get(e)}</em></label>`).join("");
 }
 function uploadAtoms() {
+  if (S.bz) return;
   const sel = new Set(S.sel.map(s => s.i));
   disp.atoms.forEach((a, i) => (a.sel = sel.has(i)));
   R.setAtoms(packAtoms(disp.atoms), disp.atoms.length);
 }
 const atlasSpecies = () => [...new Set(S.layers.filter(l => l.kind === "atoms").flatMap(l => itemOf(l).structure.species))];
 function uploadLabels() {
-  if (!R || !R.setLabels) return;
+  if (!R || !R.setLabels || S.bz) return;
   const list = S.labels.map(s => { const a = disp.atoms[s.i]; return { x: a.x, y: a.y, z: a.z, r: Math.max(a.r, 0.36), text: a.el, color: a.color }; });
   R.setLabels(packLabels(list, S.atlas ? S.atlas.map : {}), list.length, S.atlas);
   labelBar();
@@ -260,13 +275,13 @@ function uploadLabels() {
 
 /* ------------------------------------------------------------------ surfaces: one request at a time per layer */
 function requestSurface(L, preview = false) { if (!L) return; L.next = { preview }; if (!L.busy) runSurface(L); }
-function refreshSurfaces() { for (const L of fieldLayers()) requestSurface(L); }
+function refreshSurfaces() { for (const L of fieldLayers()) requestSurface(L); syncSlice(); }
 async function runSurface(L) {
   const p = L.next;
   L.next = null;
   if (!p || !R) return;
   const it = itemOf(L), f = it && it.fields[L.fi];
-  if (!f || !L.visible || !S.layers.includes(L)) { R.removeMeshGroup(L.id); L.mesh = null; if (L === activeField()) levelHint(); requestRender(); return; }
+  if (!f || !L.visible || !S.layers.includes(L) || S.bz) { R.removeMeshGroup(L.id); L.mesh = null; if (L === activeField()) levelHint(); requestRender(); return; }
   L.busy = true;
   try {
     const reps = (f.periodic || f.closed) && pbcOf(it) ? S.reps : [1, 1, 1];
@@ -292,6 +307,7 @@ function restyleLayer(L) {
 
 /* ------------------------------------------------------------------ camera, views, triad */
 function sceneSphere() {
+  if (S.bz && S.bzData) return { c: [0, 0, 0], r: BZ_SIZE * 1.15 };
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   const add = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
   for (const a of disp.atoms) add([a.x, a.y, a.z]);
@@ -1123,6 +1139,7 @@ async function openFiles(list, mode = "auto") {
   busy(true);
   try {
     if (!(await ensureRenderer())) return;
+    if (S.bz) setBZ(false);
     const d = await call("open", { files });
     let add = mode === "add" && S.layers.length > 0;
     if (mode === "auto" && S.layers.length) {
@@ -1135,6 +1152,7 @@ async function openFiles(list, mode = "auto") {
   finally { busy(false); }
 }
 function clearScene() {
+  if (S.bz) setBZ(false);
   for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
   S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
   S.frame = 0; S.playing = false; S.hide = new Set();
@@ -1198,7 +1216,7 @@ async function addItem(d, adding, quiet = false) {
 let saveTimer = 0, restoring = false;
 /** Store an item's files once, while the scene's kept files stay within store.LIMIT bytes. */
 function keepFiles(it) {
-  if (!it.files || !it.files.length) return;
+  if (EMBED || !it.files || !it.files.length) return;
   const used = [...S.items.values()].reduce((a, o) => a + (o.kept ? o.files.reduce((b, f) => b + f.size, 0) : 0), 0);
   const size = it.files.reduce((a, f) => a + f.size, 0);
   if (used + size > store.LIMIT) return;
@@ -1206,7 +1224,7 @@ function keepFiles(it) {
   store.putFiles(it.key, it.files).then(r => { if (!r) it.kept = false; });
 }
 function saveSoon() {
-  if (restoring) return;
+  if (restoring || EMBED) return;
   clearTimeout(saveTimer);
   // WHY: prune by every item still in memory (a removed layer can come back with Undo), not only the shown ones
   saveTimer = setTimeout(() => { if (!restoring && !S.exporting) store.putState(serialize()).then(() => store.pruneFiles(new Set([...S.items.values()].filter(i => i.kept).map(i => i.key)))); }, 700);
@@ -1348,6 +1366,8 @@ function updateInfo() {
   $("info").textContent = info;
 }
 function summaries() {
+  syncSlice();
+  if (!mainTraj()) $("anwin").hidden = true;
   const pc = primaryCell();
   $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== "classic" ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}${S.hide.size ? ` · no ${[...S.hide].join(", ")}` : ""}`;
   const L = activeField(), f = activeStats();
@@ -1364,6 +1384,8 @@ function segState() {
 
 /* ------------------------------------------------------------------ home page, examples, image */
 function showHome() {
+  // embedded: the wordmark opens the full site (with the same file when it came from a URL)
+  if (EMBED) { window.open(location.origin + location.pathname + (qp.get("url") ? "?url=" + encodeURIComponent(qp.get("url")) : ""), "_blank", "noopener"); return; }
   $("empty").hidden = false;
   const back = $("btn-back");
   back.hidden = !S.layers.length;
@@ -1488,6 +1510,9 @@ const OPTIONS = [
   { t: "Open files", sel: "#btn-open", k: "open load import file replace", self: true },
   { t: "Save image", sel: "#btn-snap", k: "save image screenshot png picture snapshot export", self: true },
   { t: "New scene", sel: "#btn-new", k: "new scene clear start over reset", self: true },
+  { t: "Brillouin zone", sel: "#bz", k: "brillouin zone reciprocal k-path kpath high symmetry points band structure bz wigner seitz" },
+  { t: "Slice", sel: "#slice", k: "slice 2d cut plane section contour map hkl miller cross section" },
+  { t: "Trajectory analysis", sel: "#an-open", k: "rdf radial distribution msd diffusion vacf vdos phonon density of states temperature analysis coordination" },
   { t: "Opening page and samples", sel: "#btn-home", k: "home opening page samples examples start", self: true },
   { t: "Space group", sel: "#doc-sg", k: "space group symmetry spacegroup hermann mauguin", self: true },
   { t: "Hide the panels", sel: '.corner-eye[data-corner="tr"]', k: "hide panels eye tuck corner H", self: true },
@@ -1748,6 +1773,7 @@ window.addEventListener("keydown", e => {
   else if (k === "r") resetView();
   else if (k === "s") snapshot();
   else if (k === "l") setLabelMode(!S.labelMode);
+  else if (k === "k" && primaryCell() && primaryCell().pbc) setBZ(!S.bz);
   else if (k === "h") tuckAll();
   else if (k === " " && maxFrames() > 1) { e.preventDefault(); play(!S.playing); }
   else if ((k === "arrowright" || k === "arrowleft") && maxFrames() > 1) { e.preventDefault(); play(false); setFrame(S.frame + (k === "arrowright" ? 1 : -1) * S.step * (e.shiftKey ? 10 : 1)); }
@@ -1757,14 +1783,476 @@ window.addEventListener("keydown", e => {
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
 try { const t = localStorage.getItem("isoview-theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
 
+/* ------------------------------------------------------------------ Brillouin zone */
+const BZ_SIZE = 5; // drawing units for the largest |k| of the zone (the camera works best with scenes of a few units)
+/** k-point label as shown: G -> Γ, Sigma -> Σ, X_1 -> X₁. */
+const kLabel = s => s.replace(/^G$/, "Γ").replace("Sigma", "Σ").replace(/_(\d)/, (m, d) => "₀₁₂₃₄₅₆₇₈₉"[d]);
+/** Turns the Brillouin-zone view on or off (keeps and restores the crystal camera). */
+function setBZ(on) {
+  if (on) {
+    const L = activeAtomsLayer(), st = L && itemOf(L).structure;
+    const tol = Math.max(1e-5, parseFloat($("t-tol").value) || 1e-5);
+    let k = null;
+    try { k = st && kpath(st, tol); } catch (e) { console.error(e); }
+    if (!k) { $("bz").checked = false; toast("The Brillouin zone needs a periodic structure.", true); return; }
+    S.bzData = { k, zone: wignerSeitz(k.B), name: itemOf(L).name };
+    S.bzCam = { q: cam.q.slice(), target: cam.target.slice(), dist: cam.dist, radius: cam.radius };
+    S.bz = true;
+  } else {
+    S.bz = false; S.bzData = null;
+    if (R) { R.removeMeshGroup("bz"); R.setLabels && uploadLabels(); }
+  }
+  $("bz").checked = S.bz;
+  buildStructure(); refreshSurfaces();
+  if (S.bz) fit();
+  else if (S.bzCam) { Object.assign(cam, S.bzCam); S.bzCam = null; }
+  summaries(); requestRender();
+}
+/** Draws the zone: edges as lines, faces as a faint shell, the k-path (accent) and b1, b2, b3 as thin rods, the
+ *  high-symmetry points as small spheres with their labels. Nothing in this view can be picked. */
+function buildBZ() {
+  const { k, zone } = S.bzData, V = zone.vertices;
+  const kmax = Math.max(...V.map(v => norm(v))), sc = BZ_SIZE / kmax, P = v => v.map(x => x * sc);
+  const accent = css("--accent") || "#3058d0", ink = css("--ink2") || "#5c626c", ax = ["--ax-a", "--ax-b", "--ax-c"].map(css);
+  const segs = zone.edges.map(([i, j]) => ({ p0: P(V[i]), p1: P(V[j]), dashed: false }));
+  const bonds = [], pts = [], labels = [];
+  for (const run of k.path) for (let i = 0; i + 1 < run.length; i++) bonds.push({ p0: P(k.points[run[i]]), p1: P(k.points[run[i + 1]]), c0: accent, c1: accent, r: 0.035 * BZ_SIZE });
+  k.B.forEach((b, i) => bonds.push({ p0: [0, 0, 0], p1: P(b), c0: ax[i] || ink, c1: ax[i] || ink, r: 0.012 * BZ_SIZE }));
+  const onPath = new Set(k.path.flat());
+  for (const [lab, q] of Object.entries(k.points)) {
+    const p = P(q), r = (onPath.has(lab) ? 0.075 : 0.05) * BZ_SIZE;
+    pts.push({ x: p[0], y: p[1], z: p[2], r, color: onPath.has(lab) ? accent : ink });
+    const d = norm(p) > 1e-9 ? p.map(x => x / norm(p)) : [0, 0, 1], o = 0.16 * BZ_SIZE;
+    labels.push({ x: p[0] + o * d[0], y: p[1] + o * d[1], z: p[2] + o * d[2], r: 0.11 * BZ_SIZE, text: kLabel(lab), color: "#ffffff" });
+  }
+  k.B.forEach((b, i) => { const p = P(b); labels.push({ x: p[0], y: p[1], z: p[2], r: 0.09 * BZ_SIZE, text: "b" + "₁₂₃"[i], color: "#ffffff" }); });
+  // faces: a fan per face, each vertex with the face normal (outward along G), as a faint translucent mesh
+  const pos = [], nrm = [], idx = [];
+  zone.faces.forEach((f, fi) => {
+    const g = zone.planes[fi], gn = norm(g), n = g.map(x => Math.round(32767 * x / gn)), base = pos.length / 3;
+    for (const vi of f) { pos.push(...P(V[vi])); nrm.push(n[0], n[1], n[2], 0); }
+    for (let t = 1; t + 1 < f.length; t++) idx.push(base, base + t, base + t + 1);
+  });
+  R.setMeshGroup("bz", [{ positions: new Float32Array(pos), normals: new Int16Array(nrm), indices: new Uint32Array(idx), triangles: idx.length / 3, color: hexToRgb01(accent), opacity: 0.1 }]);
+  disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
+  S.sel = []; S.labels = [];
+  R.setAtoms(packAtoms(pts), pts.length);
+  R.setBonds(packBonds(bonds), bonds.length);
+  R.setLines(packLines(segs), segs.length);
+  if (R.setLabels) { const atlas = buildAtlas(labels.map(l => l.text)); R.setLabels(packLabels(labels, atlas ? atlas.map : {}), atlas ? labels.length : 0, atlas); }
+  updateSelectionBar();
+  const pathText = k.path.map(r => r.map(kLabel).join("–")).join(" | ");
+  $("info").textContent = `Brillouin zone of ${S.bzData.name} · ${k.variant.toUpperCase()} · ${pathText} · |b| ${k.B.map(b => norm(b).toFixed(3)).join(" ")} Å⁻¹`;
+  requestRender();
+}
+$("bz").addEventListener("change", e => setBZ(e.target.checked));
+
+/* ------------------------------------------------------------------ 2D slices */
+const SL_NEAR = 0.8; // A: atoms closer than this to the plane are drawn on the slice
+const SL = { on: false, hkl: [0, 0, 1], t: 0.5, scale: "auto", map: "auto", iso: true, atoms: true, in3d: true, img: null, key: "", busy: false, again: null };
+/** The field layer the slice is taken from (the active one, else the first visible one) with its item and field. */
+function sliceTarget() {
+  const L = activeField() || fieldLayers(true)[0], it = L && itemOf(L), f = it && it.fields[L.fi];
+  return f ? { L, it, f } : null;
+}
+/** Re-slices when anything the slice depends on changed (layer, field, shift, supercell, plane, position). */
+function syncSlice() {
+  const T = sliceTarget();
+  $("slicewin").hidden = !SL.on || !T;
+  if (!SL.on || !T || S.bz) { SL.key = ""; if (R && R.setSlice) { R.setSlice(null); } if (S.bz) $("slicewin").hidden = true; return; }
+  const k = [T.L.id, T.L.fi, T.f.name, T.f.n.join(), T.it.ds, S.t.join(), S.reps.join(), SL.hkl.join(), SL.t].join("|");
+  if (k !== SL.key) { SL.key = k; requestSlice(false); }
+}
+/** One slice request at a time; a request made meanwhile runs after it (only the latest). preview: coarse, fast. */
+function requestSlice(preview) {
+  if (SL.busy) { SL.again = SL.again === false ? false : preview; return; }
+  SL.busy = true;
+  sliceNow(preview).catch(e => toast(e.message || String(e), true)).finally(() => {
+    SL.busy = false;
+    if (SL.again !== null) { const p = SL.again; SL.again = null; requestSlice(p); }
+  });
+}
+async function sliceNow(preview) {
+  const T = sliceTarget();
+  if (!SL.on || !T) return;
+  const { L, it, f } = T, per = (f.periodic || f.closed) && pbcOf(it), reps = per ? S.reps : [1, 1, 1];
+  const N = f.periodic ? f.n : f.n.map(n => n - 1);
+  // WHY: four pixels per grid step of the (already refined, <= 0.1 A) grid; the cubic interpolation fills between
+  const step = Math.min(...f.span.map((v, a) => norm(v) / N[a]));
+  const r = await call("slice", { ds: it.ds, fi: L.fi, cell: f.span.map((v, a) => v.map(c => c * reps[a])), origin: f.origin, hkl: SL.hkl, t: SL.t,
+    px: step / 4, maxSide: preview ? 320 : 1600, shift: fracShift(f.span) });
+  SL.img = { ...r, f, signed: f.kind === "signed" };
+  paintSlice();
+}
+/** Scale mode and colour map in use (auto: log for densities, symmetric for signed fields, else linear). */
+function sliceStyle() {
+  const g = SL.img, kind = g.f.kind;
+  let mode;
+  if (SL.scale === "log") mode = g.max > 0 ? "log" : "lin";
+  else if (SL.scale === "lin") mode = g.signed ? "signed" : "lin";
+  else mode = g.signed ? "signed" : kind === "density" && g.min >= 0 && g.max > 0 ? "log" : "lin";
+  const map = SL.map !== "auto" ? SL.map : mode === "signed" ? "rdbu" : "viridis";
+  // log: three decades below the largest value
+  const lo = mode === "log" ? g.max * 1e-3 : g.min, hi = g.max;
+  return { mode, map, lo, hi, sc: scaler(mode, lo, hi) };
+}
+/** Colours the slice image, hands it to the renderer and redraws the window. */
+function paintSlice() {
+  const g = SL.img;
+  if (!g) return;
+  const st = sliceStyle(), px = paint(g.values, g.W, g.H, st.map, st.sc);
+  const c = document.createElement("canvas");
+  c.width = g.W; c.height = g.H;
+  const x = c.getContext("2d");
+  if (x) x.putImageData(new ImageData(px, g.W, g.H), 0, 0);
+  SL.canvas = c; SL.style = st;
+  if (R && R.setSlice) R.setSlice(SL.in3d ? { o: g.plane.o, U: g.plane.U, V: g.plane.V, alpha: 0.95, image: c } : null);
+  requestRender();
+  drawSliceWindow();
+  segSlice();
+}
+/** Contour levels: 8 evenly spaced in the colour scale (symmetric pairs for signed fields), as field values. */
+function sliceLevels(st) {
+  const out = [];
+  if (st.mode === "signed") { const m = Math.max(Math.abs(st.lo), Math.abs(st.hi)); for (let i = 1; i <= 4; i++) out.push(m * i / 5, -m * i / 5); }
+  else if (st.mode === "log") { const a = Math.log10(st.lo), b = Math.log10(st.hi); for (let i = 1; i <= 8; i++) out.push(10 ** (a + (b - a) * i / 9)); }
+  else for (let i = 1; i <= 8; i++) out.push(st.lo + (st.hi - st.lo) * i / 9);
+  return out;
+}
+/** Atoms within SL_NEAR of the plane, as { s, r (fractions of U, V), rad (A), el, w (closeness 0..1) }. */
+function sliceAtoms(P) {
+  const out = [], U2 = dot(P.U, P.U), V2 = dot(P.V, P.V);
+  for (const a of disp.atoms) {
+    const p = [a.x, a.y, a.z], dist = dot(p, P.n) - P.d;
+    if (Math.abs(dist) > SL_NEAR) continue;
+    const q = [p[0] - P.o[0], p[1] - P.o[1], p[2] - P.o[2]], s = dot(q, P.U) / U2, r = dot(q, P.V) / V2;
+    if (s < -0.02 || s > 1.02 || r < -0.02 || r > 1.02) continue;
+    out.push({ s, r, rad: 0.42 * rcov(a.el), el: a.el, w: 1 - Math.abs(dist) / SL_NEAR });
+  }
+  return out;
+}
+/** Draws the figure (image, contours, atoms, cross-section outline) into a 2D context of w x h pixels. */
+function drawSliceFigure(ctx, w, h, lw = 1) {
+  const g = SL.img, P = g.plane, st = SL.style, X = s => s * w, Y = r => h - r * h;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save(); ctx.translate(0, h); ctx.scale(w / g.W, -h / g.H); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(SL.canvas, 0, 0); ctx.restore();
+  if (SL.iso) for (const c of sliceLevels(st)) {
+    const seg = contours(g.values, g.W, g.H, c);
+    ctx.beginPath();
+    for (let i = 0; i < seg.length; i += 4) { ctx.moveTo(X(seg[i] / g.W), Y(seg[i + 1] / g.H)); ctx.lineTo(X(seg[i + 2] / g.W), Y(seg[i + 3] / g.H)); }
+    ctx.setLineDash(c < 0 ? [4 * lw, 3 * lw] : []);
+    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 0.8 * lw; ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  P.poly.forEach(([s, r], i) => (i ? ctx.lineTo(X(s), Y(r)) : ctx.moveTo(X(s), Y(r))));
+  ctx.closePath(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 1 * lw; ctx.stroke();
+  if (SL.atoms) {
+    const k = w / P.width;
+    for (const a of sliceAtoms(P)) {
+      ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * lw, a.rad * k), 0, 2 * Math.PI);
+      ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = colorOf(a.el); ctx.fill();
+      ctx.lineWidth = 1 * lw; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+}
+/** Sizes the window's canvas to its box (device pixels) and draws the figure and the colour bar. */
+function drawSliceWindow() {
+  const g = SL.img, cv = $("sl-cv");
+  if (!g || $("slicewin").hidden) return;
+  const P = g.plane, dpr = window.devicePixelRatio || 1, cw = cv.clientWidth || 300;
+  const ch = Math.min(cw * P.height / P.width, (window.innerHeight || 800) * 0.6);
+  const w = Math.round(ch / (P.height / P.width) < cw ? ch * P.width / P.height : cw);
+  cv.style.height = ch + "px"; cv.width = Math.round(w * dpr); cv.height = Math.round(ch * dpr);
+  cv.style.width = w + "px";
+  const ctx = cv.getContext("2d");
+  if (ctx) drawSliceFigure(ctx, cv.width, cv.height, dpr);
+  const cb = $("sl-cb"), t = lut(SL.style.map), cx = cb.getContext("2d");
+  if (cx) { const im = cx.createImageData(1, 256); for (let i = 0; i < 256; i++) { im.data.set(t.subarray(3 * (255 - i), 3 * (255 - i) + 3), 4 * i); im.data[4 * i + 3] = 255; } cb.width = 1; cb.height = 256; cx.putImageData(im, 0, 0); }
+  const st = SL.style, u = g.f.unit ? " " + g.f.unit : "";
+  $("sl-max").textContent = fmt(st.mode === "signed" ? Math.max(Math.abs(st.lo), Math.abs(st.hi)) : st.hi);
+  $("sl-min").textContent = fmt(st.mode === "signed" ? -Math.max(Math.abs(st.lo), Math.abs(st.hi)) : st.lo);
+  $("sl-max").title = `${$("sl-max").textContent}${u}`; $("sl-min").title = `${$("sl-min").textContent}${u}`;
+  $("sl-d").textContent = `${P.d.toFixed(2)} Å`;
+  $("sl-d").title = `The plane is ${(P.d - P.dRange[0]).toFixed(3)} Å into the cell, of ${P.depth.toFixed(3)} Å, along the normal of (${SL.hkl.join(" ")})`;
+}
+function segSlice() {
+  for (const b of $("sl-planes").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SL.hkl.join(" ")));
+  const mode = SL.img ? SL.style && SL.style.mode : "";
+  for (const b of $("sl-scale").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === (mode === "log" ? "log" : "lin")));
+}
+function setSlicePlane(hkl) {
+  if (hkl.length !== 3 || hkl.some(x => !Number.isInteger(x)) || hkl.every(x => x === 0)) { toast("Give three whole numbers h k l, not all zero, e.g. 1 1 0.", true); $("sl-hkl").value = SL.hkl.join(" "); return; }
+  SL.hkl = hkl; $("sl-hkl").value = hkl.join(" "); segSlice(); syncSlice();
+}
+/** The figure as SVG: the image (PNG, embedded), contour paths, the outline, atoms, a colour bar with its range. */
+function sliceSVG() {
+  const g = SL.img, P = g.plane, st = SL.style, W = 800, H = Math.round(W * P.height / P.width), X = s => (s * W).toFixed(2), Y = r => (H - r * H).toFixed(2);
+  const flip = document.createElement("canvas"); flip.width = g.W; flip.height = g.H;
+  const fx = flip.getContext("2d"); fx.translate(0, g.H); fx.scale(1, -1); fx.drawImage(SL.canvas, 0, 0);
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W + 90}" height="${H}" viewBox="0 0 ${W + 90} ${H}" font-family="Helvetica, Arial, sans-serif">`,
+    `<image x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none" xlink:href="${flip.toDataURL("image/png")}"/>`];
+  if (SL.iso) for (const c of sliceLevels(st)) {
+    const seg = contours(g.values, g.W, g.H, c);
+    let d = "";
+    for (let i = 0; i < seg.length; i += 4) d += `M${X(seg[i] / g.W)} ${Y(seg[i + 1] / g.H)}L${X(seg[i + 2] / g.W)} ${Y(seg[i + 3] / g.H)}`;
+    if (d) parts.push(`<path d="${d}" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"${c < 0 ? ' stroke-dasharray="4 3"' : ""}/>`);
+  }
+  parts.push(`<polygon points="${P.poly.map(([s, r]) => `${X(s)},${Y(r)}`).join(" ")}" fill="none" stroke="#000" stroke-opacity="0.45"/>`);
+  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${colorOf(a.el)}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
+  const t = lut(st.map), stops = [];
+  for (let i = 0; i <= 16; i++) { const k = Math.round(255 * i / 16); stops.push(`<stop offset="${(i / 16).toFixed(4)}" stop-color="rgb(${t[3 * k]},${t[3 * k + 1]},${t[3 * k + 2]})"/>`); }
+  const m = Math.max(Math.abs(st.lo), Math.abs(st.hi)), top = st.mode === "signed" ? m : st.hi, bot = st.mode === "signed" ? -m : st.lo;
+  parts.push(`<defs><linearGradient id="cb" x1="0" y1="1" x2="0" y2="0">${stops.join("")}</linearGradient></defs>`,
+    `<rect x="${W + 14}" y="20" width="12" height="${H - 40}" fill="url(#cb)"/>`,
+    `<text x="${W + 30}" y="28" font-size="11">${esc(fmt(top))}</text><text x="${W + 30}" y="${H - 20}" font-size="11">${esc(fmt(bot))}</text>`,
+    `<text x="${W + 30}" y="${H / 2}" font-size="10" fill="#666">${esc((g.f.unit || "") + (st.mode === "log" ? " (log)" : ""))}</text></svg>`);
+  return parts.join("\n");
+}
+function sliceName(ext) { return `${($("doc-name").textContent || "slice").replace(/[^\w.+-]+/g, "_")}-slice-${SL.hkl.join("")}-${SL.t.toFixed(3)}.${ext}`; }
+$("slice").addEventListener("change", e => { SL.on = e.target.checked; if (!SL.on) { SL.img = null; } syncSlice(); if (SL.on) setTimeout(drawSliceWindow, 0); });
+$("sl-x").addEventListener("click", () => { $("slice").checked = false; SL.on = false; SL.img = null; syncSlice(); requestRender(); });
+$("sl-big").addEventListener("click", () => { const on = !$("slicewin").classList.contains("big"); $("slicewin").classList.toggle("big", on); $("sl-big").setAttribute("aria-pressed", String(on)); drawSliceWindow(); });
+$("sl-planes").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setSlicePlane(b.value.split(" ").map(Number)); });
+$("sl-hkl").addEventListener("change", e => setSlicePlane(e.target.value.trim().split(/[\s,]+/).map(Number)));
+$("sl-t").addEventListener("input", e => { SL.t = +e.target.value; SL.key = "moving"; requestSlice(true); });
+$("sl-t").addEventListener("change", e => { SL.t = +e.target.value; SL.key = ""; syncSlice(); });
+$("sl-scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { SL.scale = b.value; paintSlice(); } });
+$("sl-map").addEventListener("change", e => { SL.map = e.target.value; paintSlice(); });
+$("sl-iso").addEventListener("change", e => { SL.iso = e.target.checked; drawSliceWindow(); });
+$("sl-atoms").addEventListener("change", e => { SL.atoms = e.target.checked; drawSliceWindow(); });
+$("sl-3d").addEventListener("change", e => { SL.in3d = e.target.checked; paintSlice(); });
+$("sl-png").addEventListener("click", () => {
+  if (!SL.img) return;
+  const P = SL.img.plane, w = 2000, h = Math.round(w * P.height / P.width), c = document.createElement("canvas");
+  c.width = w; c.height = h; drawSliceFigure(c.getContext("2d"), w, h, w / 400);
+  c.toBlob(b => download(b, sliceName("png")), "image/png");
+});
+$("sl-svg").addEventListener("click", () => { if (SL.img) download(new Blob([sliceSVG()], { type: "image/svg+xml" }), sliceName("svg")); });
+// the window moves by its header
+$("sl-head").addEventListener("pointerdown", e => {
+  if (e.target.closest("button, input")) return;
+  const win = $("slicewin"), r = win.getBoundingClientRect(), x0 = e.clientX - r.left, y0 = e.clientY - r.top;
+  const move = ev => { win.style.left = Math.max(0, ev.clientX - x0) + "px"; win.style.top = Math.max(0, ev.clientY - y0) + "px"; win.style.bottom = "auto"; };
+  const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+});
+window.addEventListener("resize", () => { if (SL.on) drawSliceWindow(); });
+
+/* ------------------------------------------------------------------ trajectory analysis */
+const AN = { kind: "rdf", rmax: 8, qty: "temperature", freq: "THz", res: null, seq: 0 };
+const AN_COLORS = ["#3058d0", "#e3a03a", "#2bb3a3", "#d6456a", "#7cb342", "#9b7be0", "#ef7d4b", "#5c9bd6", "#a0785a", "#c05fb0"];
+const AN_TOTAL = "#6b7280";
+const THZ_TO_CM = 33.35641; // cm^-1 per THz
+/** The main trajectory restricted to the atoms still present (structure.ids): { structure, traj } for analysis.js. */
+function anData(it) {
+  const t = it.traj, st = it.structure, ids = st.ids;
+  let pos = t.pos, nat = t.nat;
+  if (ids) {
+    nat = ids.length; pos = new Float64Array(3 * nat * t.n);
+    for (let f = 0; f < t.n; f++) for (let j = 0; j < nat; j++) {
+      const a = 3 * (t.nat * f + ids[j] - 1), b = 3 * (nat * f + j);
+      pos[b] = t.pos[a]; pos[b + 1] = t.pos[a + 1]; pos[b + 2] = t.pos[a + 2];
+    }
+  }
+  return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
+}
+const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
+/** Opens the analysis window on tab kind and computes it. */
+function openAnalysis(kind) {
+  AN.kind = kind;
+  $("anwin").hidden = false;
+  runAnalysis();
+}
+async function runAnalysis() {
+  const it = mainTraj();
+  for (const b of $("an-tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === AN.kind));
+  anOptions();
+  if (!it || $("anwin").hidden) return;
+  const dt_fs = anDt(), seq = ++AN.seq;
+  AN.res = null; $("an-res").textContent = "";
+  if (AN.kind === "vacf" && !dt_fs) { $("an-plot").innerHTML = '<div class="an-wait">The VDOS needs the time between saved frames: set Time step in the Trajectory panel.</div>'; return; }
+  $("an-plot").innerHTML = '<div class="an-wait">Computing…</div>';
+  const { structure, traj } = anData(it);
+  try {
+    const r = await call("analysis", { kind: AN.kind, structure, traj, opts: AN.kind === "rdf" ? { rmax: AN.rmax } : { dt_fs } });
+    if (seq !== AN.seq) return;
+    AN.res = { kind: AN.kind, r, name: it.name };
+    drawAnalysis();
+  } catch (e) { if (seq === AN.seq) $("an-plot").innerHTML = `<div class="an-wait">${esc(e.message || String(e))}</div>`; }
+}
+/** The options of the current tab, in the window's bottom row. */
+function anOptions() {
+  const o = $("an-opts");
+  if (AN.kind === "rdf") o.innerHTML = `<label>r max <input type="number" id="an-rmax" min="1" max="30" step="0.5" value="${AN.rmax}"> Å</label>`;
+  else if (AN.kind === "vacf") o.innerHTML = `<div class="seg2" id="an-freq"><button type="button" value="THz" aria-pressed="${AN.freq === "THz"}">THz</button><button type="button" value="cm" aria-pressed="${AN.freq === "cm"}">cm⁻¹</button></div>`;
+  else if (AN.kind === "frames") {
+    const r = AN.res && AN.res.kind === "frames" ? AN.res.r : null, Q = [["temperature", "temperature"], ["energy", "energy"], ["volume", "volume"], ["density", "density"], ["a", "a"], ["b", "b"], ["c", "c"]];
+    o.innerHTML = `<select id="an-qty" aria-label="Quantity">${Q.filter(([k]) => !r || r[k]).map(([k, t]) => `<option value="${k}"${k === AN.qty ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+  } else o.innerHTML = "";
+}
+/** First peak of g(r) and the first minimum after it (indices), for coordination numbers. g is first smoothed by a
+ *  running mean over +-w bins (w = 0.1 A / dr) so that noise does not end the shell early; the minimum is the lowest
+ *  point before the smoothed curve rises again by 10% of the peak. */
+function firstShell(g, dr) {
+  const w = Math.max(1, Math.round(0.1 / dr)), sm = new Float64Array(g.length);
+  for (let i = 0; i < g.length; i++) { let a = 0, c = 0; for (let j = Math.max(0, i - w); j <= Math.min(g.length - 1, i + w); j++) { a += g[j]; c++; } sm[i] = a / c; }
+  let p = 0;
+  for (let i = 1; i < sm.length; i++) if (sm[i] > sm[p]) p = i;
+  let m = p;
+  for (let i = p + 1; i < sm.length; i++) { if (sm[i] < sm[m]) m = i; else if (sm[i] > sm[m] + 0.1 * sm[p]) break; }
+  return { p, m };
+}
+/** Series, axis titles and a result text for the current result. */
+function anChart() {
+  const { kind, r } = AN.res, dt = anDt();
+  if (kind === "rdf") {
+    if (!r.total.g) return { series: [{ label: "all atoms", x: r.rEdge, y: r.total.n, color: AN_TOTAL }], xlabel: "r (Å)", ylabel: "neighbours within r", text: "No cell: neighbour counts instead of g(r)." };
+    const series = [{ label: "all", x: r.r, y: r.total.g, color: AN_TOTAL, width: 1.2 }], lines = [];
+    r.pairs.forEach((q, i) => {
+      series.push({ label: q.label, x: r.r, y: q.g, color: AN_COLORS[i % AN_COLORS.length] });
+      const { p, m } = firstShell(q.g, r.dr);
+      if (q.g[p] > 0) lines.push(`${q.label.padEnd(7)} peak ${r.r[p].toFixed(2)} Å   ${q.b} around ${q.a}: ${q.nab[m].toFixed(2)}${q.a !== q.b ? `, ${q.a} around ${q.b}: ${q.nba[m].toFixed(2)}` : ""} (to ${r.rEdge[m].toFixed(2)} Å)`);
+    });
+    return { series, xlabel: "r (Å)", ylabel: "g(r)", zero: true, text: lines.join("\n") + `\n${r.frames.length} frames averaged`, xname: "r (A)" };
+  }
+  if (kind === "msd") {
+    const ps = r.timeUnit === "ps", series = [], lines = [];
+    r.elements.forEach((e, i) => {
+      const c = AN_COLORS[i % AN_COLORS.length];
+      series.push({ label: e.el, x: r.t, y: e.msd, color: c });
+      if (Number.isFinite(e.slope)) series.push({ label: "", x: e.fit, y: e.fit.map(t => e.slope * t + e.intercept), color: c, dash: true, width: 1 });
+      lines.push(ps && e.D_cm2s != null ? `${e.el.padEnd(3)} D = ${e.D_cm2s.toExponential(2)} cm²/s  (${e.D_A2ps.toPrecision(3)} Å²/ps, ${e.count} atoms)` : `${e.el.padEnd(3)} ${e.count} atoms`);
+    });
+    if (!ps) lines.push("Set Time step (Trajectory panel) for the time axis and D.");
+    else lines.push(`fit over ${r.elements[0] ? r.elements[0].fit.map(t => t.toPrecision(3)).join("–") : ""} ps (dashed); drift ${r.removeDrift ? "removed" : "kept"}`);
+    return { series, xlabel: ps ? "t (ps)" : "lag (frames)", ylabel: "MSD (Å²)", zero: true, text: lines.join("\n"), xname: ps ? "t (ps)" : "lag (frames)" };
+  }
+  if (kind === "vacf") {
+    const cm = AN.freq === "cm", x = cm ? r.nu_cm : r.nu_THz, k = cm ? 1 / THZ_TO_CM : 1;
+    const series = [{ label: "total", x, y: Array.from(r.total.vdos, v => v * k), color: AN_TOTAL, width: 1.2 }];
+    if (r.elements.length > 1) r.elements.forEach((e, i) => series.push({ label: e.el, x, y: Array.from(e.vdos, v => v * k), color: AN_COLORS[i % AN_COLORS.length] }));
+    const f = v => (cm ? `${(v * THZ_TO_CM).toFixed(0)} cm⁻¹` : `${v.toPrecision(3)} THz`);
+    return { series, xlabel: cm ? "frequency (cm⁻¹)" : "frequency (THz)", ylabel: cm ? "VDOS (1/cm⁻¹)" : "VDOS (1/THz)", zero: true,
+      text: `resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
+  }
+  const Q = { temperature: ["temperature estimate (K)", "K"], energy: ["energy (eV)", "eV"], volume: ["volume (Å³)", "Å³"], density: ["density (g/cm³)", "g/cm³"], a: ["a (Å)", "Å"], b: ["b (Å)", "Å"], c: ["c (Å)", "Å"] };
+  let q = AN.qty;
+  if (!r[q]) q = Object.keys(Q).find(k => r[k]) || "energy";
+  const y = r[q] || [], x = r.t ? Array.from(r.t) : Array.from({ length: r.n }, (_, i) => i + 1);
+  const vals = Array.from(y).filter(Number.isFinite), mean = vals.reduce((a, v) => a + v, 0) / (vals.length || 1);
+  let sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, vals.length - 1));
+  if (sd < 1e-9 * Math.abs(mean)) sd = 0; // a fixed cell: rounding only
+  let text = vals.length ? `mean ${fmt(mean)} ± ${fmt(sd)} ${Q[q][1]} over ${vals.length} frames` : "Not available for this file.";
+  if (q === "temperature") text += vals.length ? "\nfrom finite differences of saved positions: right only when every MD step (or every other) is saved" : "\nneeds the time step (Trajectory panel)";
+  return { series: [{ label: q, x, y: Array.from(y), color: AN_COLORS[0] }], xlabel: r.t ? "t (ps)" : "frame", ylabel: Q[q][0], text, xname: r.t ? "t (ps)" : "frame" };
+}
+function drawAnalysis() {
+  if (!AN.res) return;
+  anOptions();
+  const c = anChart(), big = $("anwin").classList.contains("big");
+  $("an-plot").innerHTML = lineChart({ ...c, W: big ? 800 : 520, H: big ? 420 : 300 });
+  $("an-res").textContent = c.text || "";
+}
+$("an-open").addEventListener("click", e => { const b = e.target.closest("[data-an]"); if (b) openAnalysis(b.dataset.an); });
+$("an-tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { AN.kind = b.value; runAnalysis(); } });
+$("an-x").addEventListener("click", () => { $("anwin").hidden = true; AN.seq++; });
+$("an-big").addEventListener("click", () => { const on = !$("anwin").classList.contains("big"); $("anwin").classList.toggle("big", on); $("an-big").setAttribute("aria-pressed", String(on)); drawAnalysis(); });
+$("an-dt").addEventListener("change", () => { if (!$("anwin").hidden && AN.kind !== "rdf") runAnalysis(); });
+$("an-opts").addEventListener("change", e => {
+  if (e.target.id === "an-rmax") { AN.rmax = Math.min(30, Math.max(1, +e.target.value || 8)); runAnalysis(); }
+  if (e.target.id === "an-qty") { AN.qty = e.target.value; drawAnalysis(); }
+});
+$("an-opts").addEventListener("click", e => { const b = e.target.closest("#an-freq button"); if (b) { AN.freq = b.value; drawAnalysis(); } });
+const anFile = ext => `${(AN.res ? AN.res.name : "trajectory").replace(/[^\w.+-]+/g, "_")}-${AN.kind === "vacf" ? "vdos" : AN.kind}.${ext}`;
+$("an-csv").addEventListener("click", () => { if (!AN.res) return; const c = anChart(); download(new Blob([toCSV(c.series.filter(s => s.label), c.xname || "x")], { type: "text/csv" }), anFile("csv")); });
+$("an-svg").addEventListener("click", () => { if (!AN.res) return; download(new Blob([lineChart({ ...anChart(), W: 720, H: 420, ink: "#222", font: "Helvetica, Arial, sans-serif" })], { type: "image/svg+xml" }), anFile("svg")); });
+$("an-head").addEventListener("pointerdown", e => {
+  if (e.target.closest("button, input")) return;
+  const win = $("anwin"), r = win.getBoundingClientRect(), x0 = e.clientX - r.left, y0 = e.clientY - r.top;
+  const move = ev => { win.style.left = Math.max(0, ev.clientX - x0) + "px"; win.style.top = Math.max(0, ev.clientY - y0) + "px"; win.style.right = win.style.bottom = "auto"; };
+  const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+});
+
+/* ------------------------------------------------------------------ use elsewhere: website embed, notebooks */
+/** Cards behind "Embed in your website" and the "Use in" symbols (top right of the opening page): install lines and
+ *  code to copy. The packages live in this repo (python/, julia/) and load the viewer from SITE with ?embed. */
+const SITE = "https://utkarsh.science/isoview/";
+const COPY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+const codeBlock = (t, id) => `<div class="code"><pre${id ? ` id="${id}"` : ""}>${esc(t)}</pre><button type="button" class="copy" title="Copy" aria-label="Copy">${COPY_SVG}</button></div>`;
+const embedSnippet = u => `<iframe src="${SITE}?embed&url=${encodeURIComponent(u || "https://example.org/files/CHGCAR")}" width="100%" height="480" style="border:0;border-radius:12px" loading="lazy" allowfullscreen></iframe>`;
+const USE = {
+  web: ["Embed in your website", () => `<p>Show a structure, density or trajectory in any web page. The file's address:</p><input type="url" id="use-url" placeholder="https://example.org/files/CHGCAR" spellcheck="false" aria-label="Address of the file"><p class="lbl">Paste into your page</p>${codeBlock(embedSnippet(""), "use-snip")}<p class="fine2">The server with the file must allow cross-origin requests (GitHub Pages and raw.githubusercontent.com do). Visitors can turn it, open the panel and save images; the file is read in their browser.</p>`],
+  jupyter: ["Use in Jupyter", () => `<p class="lbl">Install</p>${codeBlock('pip install "isoview-notebook @ git+https://github.com/utksi/isoview#subdirectory=python"')}<p class="lbl">In a notebook</p>${codeBlock('import isoview\nisoview.show("CHGCAR")             # any file isoview opens\nisoview.show("WAVECAR", "CONTCAR")  # several files, one scene\nisoview.show(atoms)                 # ASE Atoms, pymatgen Structure')}<p class="fine2">JupyterLab, Notebook, VS Code and Colab. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
+  julia: ["Use in Julia", () => `<p class="lbl">Install</p>${codeBlock('using Pkg\nPkg.add(url="https://github.com/utksi/isoview", subdir="julia")')}<p class="lbl">In a notebook</p>${codeBlock('using Isoview\nisoview("CHGCAR")             # any file isoview opens\nisoview("WAVECAR", "CONTCAR")  # several files, one scene')}<p class="fine2">Pluto, IJulia (Jupyter) and VS Code. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
+};
+let useOpen = null;
+function showUse(key) {
+  const pop = $("use-pop");
+  for (const b of document.querySelectorAll("[data-use]")) b.setAttribute("aria-expanded", String(b.dataset.use === key));
+  useOpen = key;
+  if (!key) { pop.hidden = true; return; }
+  $("use-h").textContent = USE[key][0];
+  $("use-body").innerHTML = USE[key][1]();
+  pop.hidden = false;
+  const u = $("use-url");
+  if (u) { u.addEventListener("input", () => { $("use-snip").textContent = embedSnippet(u.value.trim()); }); u.focus(); }
+}
+for (const b of document.querySelectorAll("[data-use]")) b.addEventListener("click", e => { e.stopPropagation(); showUse(useOpen === b.dataset.use ? null : b.dataset.use); });
+$("use-x").addEventListener("click", () => showUse(null));
+$("use-pop").addEventListener("click", e => {
+  const c = e.target.closest(".copy");
+  if (!c) return;
+  const t = c.parentElement.querySelector("pre").textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Copied."), () => toast("Select the text and copy it.", true));
+});
+document.addEventListener("click", e => { if (useOpen && !e.target.closest("#use-pop")) showUse(null); });
+document.addEventListener("keydown", e => { if (useOpen && e.key === "Escape") { e.stopPropagation(); showUse(null); } }, true);
+
 startWorker();
 segState();
 // test hook (tests set globalThis.__isoviewTest before importing this module)
-if (globalThis.__isoviewTest) globalThis.__isoview = { S, cam, get disp() { return disp; } };
+if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, AN, cam, get disp() { return disp; } };
+/* ------------------------------------------------------------------ embedding */
+/**
+ * Embedded mode (?embed, in an iframe on a website or in a notebook): nothing is kept in or restored from this
+ * browser, the opening page is never shown, the panel (unless ?panel=1) and the axes corner start tucked away, and the
+ * wordmark opens the full site in a new tab. Options: ?theme=light|dark, ?style=<Structure style>, ?look=<Look>.
+ * A parent page (the notebook packages in python/ and julia/) sends files by postMessage:
+ *   { isoview: "open", files: [{ name, base64 } or { name, data: ArrayBuffer | Uint8Array | string }], mode: "replace" | "add" }
+ * and receives { isoview: "ready" } once this page listens, then { isoview: "opened", layers } after each open.
+ */
+function initEmbed() {
+  document.documentElement.classList.add("embed");
+  $("empty").hidden = true;
+  $("btn-home").title = "Open in isoview (new tab)";
+  if (qp.get("panel") !== "1") tuck("tr", true);
+  tuck("bl", true);
+  const th = qp.get("theme");
+  // WHY: set directly, not through the Theme buttons, which would also store the choice for the full site
+  if (th === "light" || th === "dark") { S.theme = th; document.documentElement.setAttribute("data-theme", th); restyle(); }
+  for (const k of ["style", "look"]) {
+    const v = qp.get(k), b = v && /^\w+$/.test(v) && document.querySelector(`.seg[data-key="${k}"] button[value="${v}"]`);
+    if (b) b.click();
+  }
+  const b64 = s => { const t = window.atob(s), u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+  window.addEventListener("message", async e => {
+    const m = e.data;
+    if (!m || m.isoview !== "open" || !Array.isArray(m.files) || !m.files.length) return;
+    let files;
+    try { files = m.files.map(f => new File([f.base64 != null ? b64(f.base64) : f.data], String(f.name || "file"))); }
+    catch (err) { toast("Could not read the files sent to the viewer.", true); return; }
+    await openFiles(files, m.mode === "add" ? "add" : "replace");
+    if (e.source) e.source.postMessage({ isoview: "opened", layers: S.layers.length }, "*");
+  });
+  if (window.parent !== window) window.parent.postMessage({ isoview: "ready" }, "*");
+}
+if (EMBED) initEmbed();
 if (qp.get("url")) {
   const u = qp.get("url");
   fetch(u).then(r => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.blob(); })
     .then(b => openFiles([new File([b], decodeURIComponent(u.split(/[?#]/)[0].split("/").pop() || "file"))], "replace"))
     .catch(e => toast(`Could not fetch ${u}: ${e.message}. The server must allow cross-origin requests.`, true, 9000));
 } else if (qp.get("example")) example(qp.get("example"));
-else store.getState().then(st => { if (st && !S.layers.length) restoreScene(st, store.getFiles); });
+else if (!EMBED) store.getState().then(st => { if (st && !S.layers.length) restoreScene(st, store.getFiles); });

@@ -490,3 +490,57 @@ void main() {
   float fade = smoothstep(5.0, 9.0, hpx);
   outColor = vec4((tc.rgb * fill + hc.rgb * halo * (1.0 - fill)) * fade, (fill + halo * (1.0 - fill)) * fade);
 }`];
+
+/**
+ * Slice plane (slice.js): one quad p = o + s U + r V, (s, r) in [0, 1], drawn with the slice image as a texture
+ * (premultiplied alpha, transparent outside the cross-section) times the opacity alpha; unlit, depth-tested and
+ * depth-writing, blended over what is behind it. Instance (40 B): o f32x3, U f32x3, V f32x3, alpha f32.
+ */
+export const WGSL_SLICE = /* wgsl */ `
+struct U { view: mat4x4f, proj: mat4x4f, viewport: vec4f, light: vec4f, accent: vec4f, line: vec4f, look: vec4f, fog: vec4f, bg: vec4f };
+@group(0) @binding(0) var<uniform> u: U;
+@group(1) @binding(0) var tex: texture_2d<f32>;
+@group(1) @binding(1) var samp: sampler;
+struct SV {
+  @builtin(position) pos: vec4f,
+  @location(0) uv: vec2f,
+  @location(1) @interpolate(flat) a: f32,
+};
+@vertex fn vs_slice(@location(0) q: vec2f, @location(1) o: vec3f, @location(2) eu: vec3f, @location(3) ev: vec3f, @location(4) alpha: f32) -> SV {
+  var s: SV;
+  let t = q * 0.5 + vec2f(0.5, 0.5);
+  s.pos = u.proj * (u.view * vec4f(o + t.x * eu + t.y * ev, 1.0));
+  s.uv = t;
+  s.a = alpha;
+  return s;
+}
+@fragment fn fs_slice(i: SV) -> @location(0) vec4f {
+  let c = textureSample(tex, samp, i.uv) * i.a;
+  if (c.a < 0.02) { discard; }
+  return c;
+}
+`;
+
+GLSL.slice = [GL_HEAD + `
+layout(location = 0) in vec2 q;
+layout(location = 1) in vec3 o;
+layout(location = 2) in vec3 eu;
+layout(location = 3) in vec3 ev;
+layout(location = 4) in float alpha;
+out vec2 uv;
+flat out float a;
+void main() {
+  vec2 t = q * 0.5 + vec2(0.5);
+  gl_Position = proj * (view * vec4(o + t.x * eu + t.y * ev, 1.0));
+  uv = t;
+  a = alpha;
+}`, GL_HEAD + `
+uniform sampler2D tex;
+in vec2 uv;
+flat in float a;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(tex, uv) * a;
+  if (c.a < 0.02) discard;
+  outColor = c;
+}`];

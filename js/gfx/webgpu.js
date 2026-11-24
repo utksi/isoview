@@ -9,8 +9,10 @@
  * Mesh: positions f32x3, normals snorm16x4, uint32 indices. Uniforms: 240-byte block (see shaders.js).
  * Labels (after the opaque meshes, before translucent ones): 44-byte instances (gfx/labels.js), premultiplied blending,
  * depth test without depth writes; the atlas is an rgba8 texture with a full mip chain made by repeated halving.
+ * Slice plane (setSlice, 40-byte instance): after the labels, before the translucent meshes; depth test and depth
+ * writes, premultiplied blending; its image is a premultiplied rgba8 texture with a mip chain made the same way.
  */
-import { WGSL, WGSL_LABEL, QUAD, LINEQ, CYL } from "./shaders.js?v=27";
+import { WGSL, WGSL_LABEL, WGSL_SLICE, QUAD, LINEQ, CYL } from "./shaders.js?v=28";
 
 const GPUB = () => globalThis.GPUBufferUsage, GPUS = () => globalThis.GPUShaderStage;
 
@@ -75,6 +77,14 @@ export class WebGPURenderer {
       fragment: { module: lmod, entryPoint: "fs_label", targets: [{ format: this.format, blend: pre }] },
       primitive: { topology: "triangle-list" }, depthStencil: depth(false, "less"), multisample });
     this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" });
+    const smod = device.createShaderModule({ code: WGSL_SLICE });
+    this.pSlice = device.createRenderPipeline({
+      layout: device.createPipelineLayout({ bindGroupLayouts: [this.bgl0, this.bglTex] }),
+      vertex: { module: smod, entryPoint: "vs_slice", buffers: [vb(8, "vertex", [[0, 0, "float32x2"]]),
+        vb(40, "instance", [[1, 0, "float32x3"], [2, 12, "float32x3"], [3, 24, "float32x3"], [4, 36, "float32"]])] },
+      fragment: { module: smod, entryPoint: "fs_slice", targets: [{ format: this.format, blend: pre }] },
+      primitive: { topology: "triangle-list" }, depthStencil: depth(true, "less"), multisample });
+    this.slice = { buf: null, n: 0 };
     this.labels = { buf: null, n: 0 };
     const stat = a => { const b = device.createBuffer({ size: a.byteLength, usage: U.VERTEX | U.COPY_DST }); device.queue.writeBuffer(b, 0, a); return b; };
     this.quad = stat(QUAD); this.lineq = stat(LINEQ); this.cyl = stat(CYL);
@@ -97,18 +107,33 @@ export class WebGPURenderer {
   setLabels(buf, n, atlas) {
     this.upload(this.labels, buf, n);
     if (!atlas || atlas.id === this.atlasId) return;
-    const d = this.device, T = globalThis.GPUTextureUsage, w = atlas.canvas.width, h = atlas.canvas.height;
-    const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+    const d = this.device;
     if (this.atlasTex) this.atlasTex.destroy();
-    this.atlasTex = d.createTexture({ size: [w, h], format: "rgba8unorm", mipLevelCount: levels, usage: T.TEXTURE_BINDING | T.COPY_DST | T.RENDER_ATTACHMENT });
-    let src = atlas.canvas;
+    this.atlasTex = this.mipTexture(atlas.canvas, false);
+    this.bgTex = d.createBindGroup({ layout: this.bglTex, entries: [{ binding: 0, resource: this.atlasTex.createView() }, { binding: 1, resource: this.sampler }] });
+    this.atlasId = atlas.id;
+  }
+  /** An rgba8 texture of a canvas with a full mip chain made by repeated halving (premultiplied when pre). */
+  mipTexture(canvas, pre) {
+    const d = this.device, T = globalThis.GPUTextureUsage, w = canvas.width, h = canvas.height;
+    const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+    const tex = d.createTexture({ size: [w, h], format: "rgba8unorm", mipLevelCount: levels, usage: T.TEXTURE_BINDING | T.COPY_DST | T.RENDER_ATTACHMENT });
+    let src = canvas;
     for (let l = 0; l < levels; l++) {
       const lw = Math.max(1, w >> l), lh = Math.max(1, h >> l);
       if (l > 0) { const c = document.createElement("canvas"); c.width = lw; c.height = lh; const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, lw, lh); src = c; }
-      d.queue.copyExternalImageToTexture({ source: src }, { texture: this.atlasTex, mipLevel: l }, [lw, lh]);
+      d.queue.copyExternalImageToTexture({ source: src }, { texture: tex, mipLevel: l, premultipliedAlpha: pre }, [lw, lh]);
     }
-    this.bgTex = d.createBindGroup({ layout: this.bglTex, entries: [{ binding: 0, resource: this.atlasTex.createView() }, { binding: 1, resource: this.sampler }] });
-    this.atlasId = atlas.id;
+    return tex;
+  }
+  /** Slice plane: { o, U, V (A), alpha, image: a canvas (new image) or null (keep the last one) }, or null to hide it. */
+  setSlice(sl) {
+    if (!sl) { this.slice.n = 0; return; }
+    this.upload(this.slice, new Float32Array([...sl.o, ...sl.U, ...sl.V, sl.alpha]), 1);
+    if (!sl.image) return;
+    if (this.sliceTex) this.sliceTex.destroy();
+    this.sliceTex = this.mipTexture(sl.image, true);
+    this.bgSlice = this.device.createBindGroup({ layout: this.bglTex, entries: [{ binding: 0, resource: this.sliceTex.createView() }, { binding: 1, resource: this.sampler }] });
   }
   /** Mesh group `key` (one per field layer): list = [{ positions, normals, indices, color: [r, g, b], opacity }]. */
   setMeshGroup(key, list) {
@@ -166,6 +191,7 @@ export class WebGPURenderer {
     const mesh = (m, p) => { pass.setPipeline(p); pass.setBindGroup(1, m.bg); pass.setVertexBuffer(0, m.pos); pass.setVertexBuffer(1, m.nrm); pass.setIndexBuffer(m.idx, "uint32"); pass.drawIndexed(m.n); };
     for (const m of this.meshes) if (m.opacity >= 0.999) mesh(m, this.pMesh);
     if (this.labels.n && this.bgTex) { pass.setPipeline(this.pLabel); pass.setBindGroup(1, this.bgTex); pass.setVertexBuffer(0, this.quad); pass.setVertexBuffer(1, this.labels.buf); pass.draw(6, this.labels.n); }
+    if (this.slice.n && this.bgSlice) { pass.setPipeline(this.pSlice); pass.setBindGroup(1, this.bgSlice); pass.setVertexBuffer(0, this.quad); pass.setVertexBuffer(1, this.slice.buf); pass.draw(6, 1); }
     for (const m of this.meshes) if (m.opacity < 0.999) {
       pass.setPipeline(this.pDepth); pass.setVertexBuffer(0, m.pos); pass.setVertexBuffer(1, m.nrm); pass.setIndexBuffer(m.idx, "uint32"); pass.drawIndexed(m.n);
       mesh(m, this.pBlend);
