@@ -27,7 +27,7 @@
  * Colour maps: viridis (polynomial fit of the matplotlib map, as published by M. Zucker, 2019, under CC0) and
  * ColorBrewer RdBu (11 classes, reversed: negative blue, positive red), linear in between, and grey.
  */
-import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=28";
+import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=29";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];

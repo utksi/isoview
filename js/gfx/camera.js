@@ -9,7 +9,8 @@
  *               (zRange). Matrices are column-major Float32Array(16).
  * Rotation by a drag (dx, dy) in CSS pixels: q <- rot(axis (dy, dx, 0) / |d|, k |d|) q, so the front of the scene
  * follows the pointer. Picking ray through a pixel: view-space origin 0 (perspective) or (x, y, 0) (orthographic),
- * mapped to world space by the inverse view transform.
+ * mapped to world space by the inverse view transform. Tiles of a large image (tileProjection): the projection
+ * followed by a scale and shift in clip space, so each tile shows its part of the same view.
  */
 
 export function qmul(a, b) {
@@ -104,4 +105,17 @@ export function pickSphere(ray, centers, radii) {
     if (t > 0 && t < bt) { bt = t; best = i; }
   }
   return best;
+}
+
+/**
+ * Projection for one tile of a larger image: P (column-major 4x4) followed by clip x' = sx x + tx w, y' = sy y + ty w,
+ * so that the pixel rectangle [px, px + tw) x [py, py + th) (origin top left) of a VW x VH image fills the tile's
+ * viewport. With x0, x1 and y0, y1 the tile's edges in normalised device coordinates of the whole image:
+ * sx = 2 / (x1 - x0), tx = -(x1 + x0) / (x1 - x0), and likewise for y. Returns a new Float32Array(16).
+ */
+export function tileProjection(P, px, py, tw, th, VW, VH) {
+  const x0 = -1 + 2 * px / VW, x1 = -1 + 2 * (px + tw) / VW, y1 = 1 - 2 * py / VH, y0 = 1 - 2 * (py + th) / VH;
+  const sx = 2 / (x1 - x0), tx = -(x1 + x0) / (x1 - x0), sy = 2 / (y1 - y0), ty = -(y1 + y0) / (y1 - y0), Q = Float32Array.from(P);
+  for (let k = 0; k < 4; k++) { const w = P[4 * k + 3]; Q[4 * k] = sx * P[4 * k] + tx * w; Q[4 * k + 1] = sy * P[4 * k + 1] + ty * w; }
+  return Q;
 }

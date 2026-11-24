@@ -2,13 +2,14 @@
 // Copyright 2026 Utkarsh Singh
 /**
  * Back-end choice and the packing of scene data into the instance layouts both back ends read.
- * createRenderer tries WebGPU, then WebGL2 (?gl=webgl2 forces the fallback, ?gl=webgpu forbids it).
+ * createRenderer tries WebGPU, then WebGL2 (?gl=webgl2 forces the fallback, ?gl=webgpu forbids it). Both back ends
+ * expose maxSide, the largest canvas side they can draw into (device px).
  * Packing (little-endian): atoms 20 B each = centre f32x3, radius f32, rgba u8 (a < 192 marks a selected atom);
  * bonds 36 B = p0, p1 f32x3, rgba u8 x2, radius f32; lines 28 B = p0, p1 f32x3, dashed f32 (0 or 1).
  * Uniform block (60 floats): view (16), proj (16), viewport (4), light (4), accent (4), line (4), look (4), fog (4), bg (4).
  */
-import { WebGPURenderer } from "./webgpu.js?v=28";
-import { WebGL2Renderer } from "./webgl2.js?v=28";
+import { WebGPURenderer } from "./webgpu.js?v=29";
+import { WebGL2Renderer } from "./webgl2.js?v=29";
 
 export async function createRenderer(canvas, onError, force = "") {
   if (force !== "webgl2") {
