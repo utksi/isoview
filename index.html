@@ -8,7 +8,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=31">
+<link rel="stylesheet" href="css/style.css?v=32">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -235,7 +235,7 @@
     <button type="button" class="back" id="btn-back" hidden></button>
     <div class="formats"><p><span>POSCAR</span><span>CONTCAR</span><span>CIF</span><span>XSF</span><span>pw.in</span><span>cube</span><span>xyz</span><span>geometry.in</span><span>PDB</span></p><p><span>CHGCAR</span><span>PARCHG</span><span>LOCPOT</span><span>ELFCAR</span><span>WAVECAR</span></p><p><span>XDATCAR</span><span>OUTCAR</span><span>vasprun.xml</span><span>ASE .traj</span><span>extxyz</span><span>AXSF</span><span>LAMMPS dump</span></p><p><span>pw.x output</span><span>.gro</span><span>CASTEP .md</span></p><p class="gz">also gzip-compressed (.gz)</p></div>
     <div class="samples" aria-label="Samples"><p class="sh">Try a sample</p><div class="sg"><span class="sk">Structures</span><span class="sl"><button type="button" data-example="rutile">rutile TiO₂<i>CIF</i></button><button type="button" data-example="sto">SrTiO₃<i>POSCAR</i></button><button type="button" data-example="zno">ZnO wurtzite<i>XSF</i></button><button type="button" data-example="graphene">graphene, 2 × 2<i>pw.in</i></button><button type="button" data-example="nacl">NaCl<i>geometry.in</i></button><button type="button" data-example="c60">C₆₀<i>xyz</i></button><button type="button" data-example="ethanol">ethanol<i>PDB</i></button></span></div><div class="sg"><span class="sk">Fields</span><span class="sl"><button type="button" data-example="si">Si model density<i>CHGCAR</i></button><button type="button" data-example="elf">carbon slab<i>ELFCAR</i></button><button type="button" data-example="locpot">Li<i>LOCPOT</i></button><button type="button" data-example="n2">N₂ orbitals<i>WAVECAR</i></button><button type="button" data-example="benzene">benzene π orbital<i>cube</i></button><button type="button" data-example="h3d">hydrogen 3d<i>computed</i></button></span></div><div class="sg"><span class="sk">Trajectories</span><span class="sl"><button type="button" data-example="vasprun">Li₁₀GeP₂S₁₂ at 800 K<i>vasprun.xml</i></button><button type="button" data-example="outcar">LiPON relaxation<i>OUTCAR</i></button><button type="button" data-example="lisi">LiSi MD<i>XDATCAR</i></button><button type="button" data-example="pwmd">Si₈ MD<i>pw.x output</i></button><button type="button" data-example="castep">Si cell relaxation<i>CASTEP .geom</i></button><button type="button" data-example="cu55">Cu₅₅ at 900 K<i>ASE .traj</i></button><button type="button" data-example="pt38">Pt₃₈ relaxing after melting<i>extxyz</i></button><button type="button" data-example="al">Al at 800 K<i>XDATCAR</i></button><button type="button" data-example="ag">Ag at 1600 K<i>LAMMPS dump</i></button><button type="button" data-example="ni">Ni adatom on Ni(100)<i>AXSF</i></button></span></div></div>
-    <p class="fine">Files are read on your device and never uploaded.<br>The last scene is kept in this browser, so a reload brings it back (New scene clears it).<br>A WAVECAR is read band by band, so large ones open quickly. Drawn with WebGPU where available, WebGL2 elsewhere. <a href="https://github.com/utksi/isoview" target="_blank" rel="noopener">Source code</a></p>
+    <p class="fine">Files are read on your device and never uploaded.<br>The last scene is kept in this browser, so a reload brings it back (New scene clears it).<br>Drawn with WebGPU where available, WebGL2 elsewhere. <a href="https://github.com/utksi/isoview" target="_blank" rel="noopener">Source code</a></p>
   </div>
 </section>
 
@@ -251,6 +251,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=31"></script>
+<script type="module" src="js/app.js?v=32"></script>
 </body>
 </html>
