@@ -24,7 +24,8 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
 
 ## In your website, notebooks and editor
 
-- **Website**: "Embed in your website" (top right of the opening page) gives an `<iframe>` that shows a file from any
+- **Website**: "Embed in your website" (top right of the opening page, or the `</>` view button once a file is open,
+  which also has the notebook snippets with the scene's file names) gives an `<iframe>` that shows a file from any
   address that allows cross-origin requests (GitHub Pages and raw.githubusercontent.com do):
   `https://utkarsh.science/isoview/?embed&url=https://.../CHGCAR`. Options: `&theme=light|dark`, `&style=stick`,
   `&look=soft`, `&panel=1` (start with the panel open). In embedded mode nothing is kept in the visitor's browser and
@@ -45,7 +46,8 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
 - **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
   or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
-  **Show elements** has a checkbox for each element, with its atom count. Untick one to hide those atoms and their
+  **Show elements** has a chip for each element, with its atom count: click the element to pick its colour (the
+  scene follows as you move through the colour picker; ↺ returns to the default), untick it to hide those atoms and their
   bonds: the bonds are still found among all atoms, so hiding Cl does not bond the cations it kept apart. Hiding
   only changes the view; Export as shown leaves hidden elements out and says so. Opening a new file shows every
   element again.
@@ -108,19 +110,30 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   displacement of each element with the diffusion coefficient from its slope; the vibrational density of states
   from the velocity autocorrelation; and per-frame energy, temperature estimate, volume, density and cell lengths.
   Time-dependent results need the time between saved frames (Time step, in fs), which most trajectory files do not
-  store. Charts save as CSV or SVG; deleted atoms are left out.
+  store. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
+  quantities, drawn as panels over one time axis. Figures save as SVG or 600 dpi PNG, 3.5 in wide (one journal
+  column), with only the curves shown, and the same curves as CSV; deleted atoms are left out.
 - **Brillouin zone** (Structure panel, or `K`): the view switches from the crystal to its first Brillouin zone,
   with b₁ b₂ b₃, the high-symmetry points and the standard k-path of Setyawan and Curtarolo (2010), as used by
   pymatgen and most band-structure plots; the line under the view names the lattice and the path. The zone follows
   the lattice of the structure (at the cell tolerance), and switching back restores the crystal and its view.
+  A **crystal inset** (bottom left) shows the structure turning with the zone, since both share one Cartesian frame:
+  drag in it to turn both, scroll to zoom it, drag its corner to resize it; Crystal inset (Structure panel) hides it.
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
   and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   The bar that appears also has **Label all** (every atom drawn) and Clear.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
 - **View**: perspective or orthographic, light or dark. Keys: `O` open, `R` reset, `A` `B` `C` view along a lattice
-  vector, `L` labels, `S` save a PNG, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
+  vector, `L` labels, `S` photo mode, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
   wordmark returns to the opening page.
+- **Colour single atoms**: select atoms and choose **Colour** in the bar that appears; every periodic image of them
+  takes the colour, it stays through supercells, deletions and reloads, and **Element colour** undoes it.
+- **Photo** (top left, or `S`): hides every control and draws the view supersampled, so edges are smooth. Turn and
+  zoom to frame it, then **Save PNG** or **Copy** at the screen's size, 2× or 4× the window (up to 16 Mpx), on the
+  theme's background, white, or none (transparent). Large images are drawn in tiles at twice the output size and
+  averaged down; a transparent background comes from one render on black and one on white. In the Brillouin-zone
+  view the crystal inset is part of the photo. `Esc` or Done returns.
 - **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
   reload brings it back. Scenes up to 512 MB of files are kept whole; larger files come back as atoms only. **New
   scene** (top left) clears it, and can be undone.
@@ -167,7 +180,7 @@ every module import and the worker, so browsers never mix cached old modules wit
 use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`; slices, the Brillouin zone and trajectory
-analysis have their own (`node tests/slice.mjs`, `tests/bz.mjs`, `tests/analysis.mjs`). The marching-cubes case
+analysis have their own (`node tests/slice.mjs`, `tests/bz.mjs`, `tests/analysis.mjs`, `tests/plot.mjs`, `tests/tiles.mjs`). The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause, licence text in
 `js/gfx/LICENSE-3Dmol.txt`).
 

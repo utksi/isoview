@@ -59,8 +59,8 @@
  * strained by 1e-7 to 1e-6 from a higher symmetry the tiny facets this drops leave a relative volume error of about
  * the strain, and the polyhedron stays closed (V - E + F = 2).
  */
-import { inv3, det3, dot, cross, norm, fracToCart, cartToFrac } from "./lattice.js?v=28";
-import { primitive, conventional } from "./symmetry.js?v=28";
+import { inv3, det3, dot, cross, norm, fracToCart, cartToFrac } from "./lattice.js?v=29";
+import { primitive, conventional } from "./symmetry.js?v=29";
 
 const TWO_PI = 2 * Math.PI;
 

@@ -10,7 +10,7 @@
  * Slice plane (setSlice): drawn after the labels and before the translucent meshes, depth-tested and depth-writing,
  * premultiplied blending; its image is uploaded premultiplied with mipmaps.
  */
-import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=28";
+import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=29";
 
 export class WebGL2Renderer {
   static create(canvas, onError) {
@@ -23,6 +23,8 @@ export class WebGL2Renderer {
 
   setup(canvas, gl, onError) {
     this.name = "WebGL2"; this.canvas = canvas; this.gl = gl; this.onError = onError;
+    // largest canvas side this context can draw into (device px)
+    this.maxSide = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0], gl.getParameter(gl.MAX_TEXTURE_SIZE));
     const prog = (name, [vs, fs]) => {
       const sh = (type, src) => {
         const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);

@@ -12,7 +12,7 @@
  * Slice plane (setSlice, 40-byte instance): after the labels, before the translucent meshes; depth test and depth
  * writes, premultiplied blending; its image is a premultiplied rgba8 texture with a mip chain made the same way.
  */
-import { WGSL, WGSL_LABEL, WGSL_SLICE, QUAD, LINEQ, CYL } from "./shaders.js?v=28";
+import { WGSL, WGSL_LABEL, WGSL_SLICE, QUAD, LINEQ, CYL } from "./shaders.js?v=29";
 
 const GPUB = () => globalThis.GPUBufferUsage, GPUS = () => globalThis.GPUShaderStage;
 
@@ -33,6 +33,7 @@ export class WebGPURenderer {
 
   setup(canvas, device, onError) {
     this.name = "WebGPU"; this.canvas = canvas; this.device = device; this.sample = 4;
+    this.maxSide = device.limits.maxTextureDimension2D; // largest canvas side (device px)
     device.addEventListener("uncapturederror", e => onError && onError("WebGPU: " + e.error.message));
     device.lost.then(info => { if (info.reason !== "destroyed" && onError) onError("WebGPU device lost: " + info.message); });
     canvas.dataset.ctx = "webgpu";

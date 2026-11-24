@@ -31,25 +31,31 @@
  * fields), sampled in the worker (slice.js), drawn as a textured plane in the scene and in the slice window with
  * contour lines, the atoms within SL_NEAR of the plane and a colour bar; saved as PNG or SVG.
  * Trajectory analysis (AN): RDF, MSD with diffusion coefficients, VDOS and per-frame series of the main trajectory
- * (analysis.js, run in the worker on the atoms still present), plotted by plot.js; saved as CSV or SVG.
+ * (analysis.js, run in the worker on the atoms still present), plotted by plot.js; chips switch curves (per frame:
+ * quantities, one panel each) on and off; the curves shown save as CSV, or as a 3.5 in figure in SVG or PNG.
  * Brillouin zone (S.bz): the view shows the first Brillouin zone of the active structure (bz.js: Wigner-Seitz cell of
  * the reciprocal lattice, Setyawan-Curtarolo points and path) instead of the scene, scaled by BZ_SIZE / max |k|;
- * the crystal view (camera included) comes back when it is switched off.
+ * the crystal view (camera included) comes back when it is switched off. A crystal inset (BZI) draws the structure
+ * with a second renderer and the main camera's rotation.
+ * Colours: element colours (S.colors, element chips) and single-atom colours (S.atomColors, by item and atom id) over
+ * the defaults of elements.js; recolor() repaints without rebuilding, so a colour picker updates the scene live.
+ * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
+ * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=28";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=28";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=28";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=28";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=28";
-import { Camera, qfromRows, qmat, pickSphere } from "./gfx/camera.js?v=28";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=28";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=28";
-import { measureAll } from "./measure.js?v=28";
-import { GifWriter, buildPalette } from "./gif.js?v=28";
-import * as store from "./store.js?v=28";
-import { contours, scaler, paint, lut } from "./slice.js?v=28";
-import { lineChart, toCSV } from "./plot.js?v=28";
-import { wignerSeitz, kpath } from "./bz.js?v=28";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=29";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=29";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=29";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=29";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=29";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=29";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=29";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=29";
+import { measureAll } from "./measure.js?v=29";
+import { GifWriter, buildPalette } from "./gif.js?v=29";
+import * as store from "./store.js?v=29";
+import { contours, scaler, paint, lut } from "./slice.js?v=29";
+import { chart, toCSV } from "./plot.js?v=29";
+import { wignerSeitz, kpath } from "./bz.js?v=29";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -70,6 +76,8 @@ const S = {
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
   frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "classic",
   hide: new Set(), // elements not drawn (Structure panel checkboxes); a view setting, the structure keeps them
+  colors: new Map(), // element -> "#rrggbb" chosen by the user (element chips)
+  atomColors: new Map(), // atomKey (item id : atom id) -> "#rrggbb" for single atoms (selection bar: Colour)
 };
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
@@ -127,7 +135,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=28", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=29", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -159,21 +167,31 @@ async function fallbackToWebGL2(msg) {
   toast(`WebGPU reported an error (${msg}); switched to WebGL2.`, true, 9000);
 }
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2), w = window.innerWidth, h = window.innerHeight;
+  const w = window.innerWidth, h = window.innerHeight, d0 = window.devicePixelRatio || 1;
+  // WHY: in photo mode the view is drawn at twice the device pixels and shown scaled down (supersampled: sphere
+  // impostors discard whole pixels, so multisampling alone leaves their edges stepped), within the renderer's
+  // largest side and PH_LIVE pixels
+  const dpr = PH.on ? Math.min(2 * d0, 4, ((R && R.maxSide) || 4096) / Math.max(w, h), Math.sqrt(PH_LIVE / (w * h))) : Math.min(d0, 2);
   canvas.width = Math.max(1, Math.round(w * dpr)); canvas.height = Math.max(1, Math.round(h * dpr));
   cam.w = w; cam.h = h;
   requestRender();
 }
 let dirty = false;
 function requestRender() { if (!dirty) { dirty = true; requestAnimationFrame(frame); } saveSoon(); }
+/** Uniforms for drawing with camera c into a target of w x h device pixels on renderer r. bg: background colour
+ *  [r, g, b] in 0..1 (fog fades toward it); dpr: device pixels per CSS pixel (line widths and outlines scale with it);
+ *  tile: [px, py, VW, VH] to draw the w x h pixel tile at (px, py) of a VW x VH image (camera.js tileProjection). */
+function uniformsFor(c, r, w, h, bg = pal.bg, dpr = w / c.w, tile = null) {
+  const lk = LOOKS[S.look] || LOOKS.classic, P0 = c.proj(r.name === "WebGPU" ? "gpu" : "gl"), P = tile ? tileProjection(P0, tile[0], tile[1], w, h, tile[2], tile[3]) : P0;
+  return packUniforms(c.view(), P, [w, h, dpr, c.ortho ? 1 : 0],
+    [0.35, 0.55, 1.0, 0.32], [...pal.accent, 0.33], [...pal.cell, 1.3 * dpr],
+    [lk[0], lk[1] * dpr, lk[2], 0], [c.dist - c.radius, c.dist + c.radius, 0, 0], [...bg, 1]);
+}
 function frame() {
   dirty = false;
   if (!R) return;
-  const dpr = canvas.width / cam.w;
-  const lk = LOOKS[S.look] || LOOKS.classic;
-  R.draw(packUniforms(cam.view(), cam.proj(R.name === "WebGPU" ? "gpu" : "gl"), [canvas.width, canvas.height, dpr, cam.ortho ? 1 : 0],
-    [0.35, 0.55, 1.0, 0.32], [...pal.accent, 0.33], [...pal.cell, 1.3 * dpr],
-    [lk[0], lk[1] * dpr, lk[2], 0], [cam.dist - cam.radius, cam.dist + cam.radius, 0, 0], [...pal.bg, 1]));
+  R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
+  if (S.bz && BZI.R && !$("bzinset").hidden) drawInset();
   drawOverlay(); drawTriad();
 }
 
@@ -199,14 +217,21 @@ function remap(list, atoms) {
     return { ...s, i: best, p: [a.x, a.y, a.z] };
   }).filter(Boolean);
 }
-function buildStructure() {
-  if (!R) return;
-  if (S.bz) { buildBZ(); return; }
+/** Colour of element el: the user's choice (S.colors) or the default (elements.js colorOf). */
+const elColor = el => S.colors.get(el) || colorOf(el);
+/** Key of atom src of layer L for S.atomColors: item id and the atom's stable id (atomId), so it survives deletions. */
+const atomKey = (L, src) => `${L.item}:${atomId(itemOf(L).structure, src)}`;
+/** Colour of display atom a of layer L: its own colour, else its element's. */
+const atomColor = (L, a) => (S.atomColors.size && S.atomColors.get(atomKey(L, a.src))) || elColor(a.el);
+/** Atoms, bonds and cell edges of the atoms layers `layers` and of the cells of `cellLayers`, as drawn now (style,
+ *  supercell, boundary atoms, hidden elements, colours). Each bond keeps its two atoms (a, b) so that colours can
+ *  change later without finding the bonds again. Returns { atoms, bonds, segs }. */
+function structureScene(layers, cellLayers) {
   const atoms = [], bonds = [], segs = [];
-  if (S.style !== "off") for (const L of atomLayers()) {
+  if (S.style !== "off") for (const L of layers) {
     const st = itemOf(L).structure, reps = st.pbc ? S.reps : [1, 1, 1];
     const da = displayAtoms(st, { reps, boundary: S.boundary && st.pbc, shift: fracShift(st.lattice), cart: S.t });
-    for (const a of da) { a.layer = L.id; a.r = radiusOf(a.el); a.color = colorOf(a.el); }
+    for (const a of da) { a.layer = L.id; a.r = radiusOf(a.el); a.color = atomColor(L, a); }
     if (S.bonds && S.style !== "space") {
       const br = (S.style === "stick" ? 0.14 : 0.1) * S.scale;
       // WHY: bonds are found among all atoms, then those to hidden elements dropped, so hiding (say) Cl does not
@@ -214,15 +239,14 @@ function buildStructure() {
       for (const [i, j] of bondList(da, { tol: S.tol, spacers: SPACERS })) {
         const a = da[i], b = da[j];
         if (S.hide.has(a.el) || S.hide.has(b.el)) continue;
-        bonds.push({ p0: [a.x, a.y, a.z], p1: [b.x, b.y, b.z], c0: a.color, c1: b.color, r: br });
+        bonds.push({ p0: [a.x, a.y, a.z], p1: [b.x, b.y, b.z], a, b, c0: a.color, c1: b.color, r: br });
       }
     }
     atoms.push(...(S.hide.size ? da.filter(a => !S.hide.has(a.el)) : da));
   }
-  speciesUI();
   if (S.cell) {
     const cells = [];
-    for (const L of S.layers) {
+    for (const L of cellLayers) {
       if (!L.visible) continue;
       const it = itemOf(L), C = cellOf(it), o = originOf(it);
       if (C && !cells.some(c => sameCell(c.L, C) && c.o.every((x, k) => Math.abs(x - o[k]) < 1e-3))) cells.push({ L: C, pbc: pbcOf(it), o });
@@ -239,30 +263,58 @@ function buildStructure() {
       if (reps.some(r => r > 1)) box(L[0].map(x => x * reps[0]), L[1].map(x => x * reps[1]), L[2].map(x => x * reps[2]), true);
     }
   }
+  return { atoms, bonds, segs };
+}
+let shownBonds = [];
+function buildStructure() {
+  if (!R) return;
+  if (S.bz) { buildBZ(); return; }
+  const { atoms, bonds, segs } = structureScene(atomLayers(), S.layers);
+  speciesUI();
   S.sel = remap(S.sel, atoms); S.labels = remap(S.labels, atoms);
   disp = { atoms, centers: Float32Array.from(atoms.flatMap(a => [a.x, a.y, a.z])), radii: Float32Array.from(atoms.map(a => a.r)) };
+  shownBonds = bonds;
   uploadAtoms(); uploadLabels();
   R.setBonds(packBonds(bonds), bonds.length);
   R.setLines(packLines(segs), segs.length);
   updateSelectionBar(); updateInfo(); updateSymmetry();
   requestRender();
 }
-/** One checkbox per element of the atoms layers on show (with its colour and atom count); unticked = not drawn. */
+/** New colours without rebuilding the scene (live while a colour picker is open): atoms, bonds, labels, the element
+ *  swatches, the slice window; in the Brillouin-zone view, the crystal inset. */
+function recolor() {
+  for (const b of document.querySelectorAll("#species .sp-col")) if (document.activeElement !== b) b.value = elColor(b.dataset.el);
+  if (!R) return;
+  if (S.bz) { buildInset(); requestRender(); return; }
+  for (const a of disp.atoms) { const L = layerById(a.layer); if (L) a.color = atomColor(L, a); }
+  for (const b of shownBonds) { b.c0 = b.a.color; b.c1 = b.b.color; }
+  uploadAtoms(); uploadLabels();
+  R.setBonds(packBonds(shownBonds), shownBonds.length);
+  if (SL.on) drawSliceWindow();
+  requestRender(); saveSoon();
+}
+/** One chip per element of the atoms layers on show: a checkbox (unticked = not drawn), the element as a colour
+ *  swatch (a click opens the colour picker; the scene follows live) with its atom count, and a reset when the colour
+ *  is not the default. */
 function speciesUI() {
   const count = new Map();
   for (const L of atomLayers()) for (const el of itemOf(L).structure.species) count.set(el, (count.get(el) || 0) + 1);
   const els = [...count.keys()].sort((a, b) => SYMBOLS.indexOf(a) - SYMBOLS.indexOf(b)), box = $("species");
   $("row-species").hidden = els.length === 0;
-  const key = els.map(e => `${e}${count.get(e)}${S.hide.has(e) ? "-" : ""}`).join();
+  const key = els.map(e => `${e}${count.get(e)}${S.hide.has(e) ? "-" : ""}${S.colors.has(e) ? "*" : ""}`).join();
   if (box.dataset.key === key) return;
   box.dataset.key = key;
-  box.innerHTML = els.map(e => `<label class="sp" title="${S.hide.has(e) ? "Show" : "Hide"} the ${esc(e)} atoms"><input type="checkbox" data-el="${esc(e)}"${S.hide.has(e) ? "" : " checked"}>` +
-    `<span class="dot" style="background:${colorOf(e)}"></span>${esc(e)}<em>${count.get(e)}</em></label>`).join("");
+  box.innerHTML = els.map(e => {
+    const x = esc(e);
+    return `<span class="sp"><input type="checkbox" data-el="${x}"${S.hide.has(e) ? "" : " checked"} title="${S.hide.has(e) ? "Show" : "Hide"} the ${x} atoms" aria-label="Show ${x}">` +
+      `<label class="sp-c" title="Colour of the ${x} atoms"><input type="color" class="sp-col" data-el="${x}" value="${elColor(e)}" aria-label="Colour of ${x}">${x}<em>${count.get(e)}</em></label>` +
+      (S.colors.has(e) ? `<button type="button" class="sp-rs" data-el="${x}" title="Back to the default ${x} colour" aria-label="Default colour for ${x}">↺</button>` : "") + `</span>`;
+  }).join("");
 }
 function uploadAtoms() {
   if (S.bz) return;
   const sel = new Set(S.sel.map(s => s.i));
-  disp.atoms.forEach((a, i) => (a.sel = sel.has(i)));
+  disp.atoms.forEach((a, i) => (a.sel = !PH.on && sel.has(i))); // no selection marks in photo mode
   R.setAtoms(packAtoms(disp.atoms), disp.atoms.length);
 }
 const atlasSpecies = () => [...new Set(S.layers.filter(l => l.kind === "atoms").flatMap(l => itemOf(l).structure.species))];
@@ -421,6 +473,10 @@ function updateSelectionBar() {
   // quick actions (the Edit panel holds the rest)
   const act = [];
   if (S.sel.length === 1) act.push(`<button type="button" data-act="center" title="${primaryCell() ? "Put this atom at the centre of the cell" : "Turn the view about this atom"}">Center</button>`);
+  if (S.sel.length) {
+    act.push(`<button type="button" data-act="color" title="Colour the selected atoms (in every periodic image)">Colour</button>`);
+    if (S.sel.some(s => S.atomColors.has(atomKey(layerById(s.layer), s.src)))) act.push(`<button type="button" data-act="uncolor" title="Give the selected atoms their element's colour again">Element colour</button>`);
+  }
   if (S.sel.length) act.push(`<button type="button" data-act="delete" class="warn" title="Delete the selected atoms in every periodic image and frame (Del)">Delete</button>`);
   if (S.region && fieldLayers(true).length) act.push(`<button type="button" data-act="cut" class="warn" title="Remove the surface inside the region">Cut surface</button>`);
   act.push(`<button type="button" data-act="edit" class="link-btn" title="Open the Edit panel">Edit ›</button>`);
@@ -1155,7 +1211,9 @@ function clearScene() {
   if (S.bz) setBZ(false);
   for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
   S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
-  S.frame = 0; S.playing = false; S.hide = new Set();
+  if (PH.on) setPhoto(false);
+  S.srcUrl = null; // web address of the scene's file, when it came from one (?url=, samples)
+  S.frame = 0; S.playing = false; S.hide = new Set(); S.colors = new Map(); S.atomColors = new Map();
   S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
   S.reps = [1, 1, 1]; ["ra", "rb", "rc"].forEach(id => ($(id).value = 1));
   // a new scene starts from the default bond reach unless "keep" (next to it) is on
@@ -1242,7 +1300,8 @@ function serialize(withFiles = false) {
       ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
     layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts, auto: !!L.auto, w: L.w } : {}) })),
     view: { style: S.style, look: S.look, scale: S.scale, bonds: S.bonds, tol: S.tol, cell: S.cell, reps: S.reps.slice(), boundary: S.boundary, res: S.res, proj: S.proj, t: S.t.slice(),
-      frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, hide: [...S.hide], active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
+      frame: S.frame, fps: S.fps, step: S.step, loop: S.loop, hide: [...S.hide], colors: [...S.colors],
+      atomColors: [...S.atomColors].map(([k, c]) => { const [it, id] = k.split(":").map(Number); return [index.get(it), id, c]; }).filter(a => a[0] !== undefined), active: S.layers.findIndex(L => L.id === S.active), activeAtoms: S.layers.findIndex(L => L.id === S.activeAtoms),
       labels: S.labels.map(l => ({ layer: S.layers.findIndex(L => L.id === l.layer), src: l.src, p: l.p })) },
     cam: { q: cam.q.slice(), dist: cam.dist, radius: cam.radius, target: cam.target.slice() },
   };
@@ -1267,7 +1326,7 @@ async function restoreScene(st, files, stored = true) {
     if (!(await ensureRenderer())) return false;
     clearScene();
     Object.assign(S, { style: st.view.style, look: LOOKS[st.view.look] ? st.view.look : "classic", scale: st.view.scale, bonds: st.view.bonds, tol: st.view.tol, cell: st.view.cell, reps: st.view.reps.slice(), boundary: st.view.boundary,
-      res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop", hide: new Set(st.view.hide || []) });
+      res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop", hide: new Set(st.view.hide || []), colors: new Map(st.view.colors || []) });
     syncControls();
     for (const sp of st.items) {
       let d = null;
@@ -1311,6 +1370,7 @@ async function restoreScene(st, files, stored = true) {
     S.active = at(st.view.active) ?? (fieldLayers()[0] || {}).id ?? null; S.activeAtoms = at(st.view.activeAtoms);
     S.frame = st.view.frame || 0;
     for (const it of trajItems()) applyFrame(it);
+    S.atomColors = new Map((st.view.atomColors || []).filter(a => made[a[0]]).map(([i, id, c]) => [`${made[i].id}:${id}`, c]));
     S.labels = (st.view.labels || []).filter(l => order[l.layer]).map(l => ({ i: -1, layer: order[l.layer].id, src: l.src, p: l.p }));
     if (!S.layers.length) { showHome(); return false; }
     for (const L of order) if (L.kind === "field" && L.w) {
@@ -1340,7 +1400,7 @@ function newScene() {
 /* ------------------------------------------------------------------ chrome */
 function updateChrome() {
   const has = S.layers.length > 0;
-  $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has; $("btn-new").hidden = !has;
+  $("dock").hidden = !has; $("br").hidden = !has; $("bl").hidden = !has; $("doc").hidden = !has; $("btn-new").hidden = !has; $("btn-photo").hidden = !has;
   for (const b of document.querySelectorAll(".corner-eye")) b.hidden = !has;
   const pc = primaryCell();
   for (const el of document.querySelectorAll(".pbc")) el.hidden = !(pc && pc.pbc);
@@ -1411,6 +1471,7 @@ async function example(id) {
     const r = await fetch("examples/" + name);
     if (!r.ok) throw new Error(`Could not load the sample (${r.status}).`);
     await openFiles([new File([await r.blob()], name)], "replace");
+    if (S.layers.length) S.srcUrl = new URL("examples/" + name, SITE).href; // for the embed card
     if (spec.reps) {
       // a sample shown as a supercell (graphene 2 x 2)
       S.reps = spec.reps.slice(); ["ra", "rb", "rc"].forEach((k, i) => ($(k).value = S.reps[i]));
@@ -1419,15 +1480,7 @@ async function example(id) {
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
 }
-function snapshot() {
-  if (!R) return;
-  frame();
-  canvas.toBlob(b => {
-    if (!b) return toast("Could not capture the image.", true);
-    download(b, ($("doc-name").textContent.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png");
-  }, "image/png");
-}
-function restyle() { if (!R) return; readPalette(); R.setBackground(pal.bg); requestRender(); }
+function restyle() { if (!R) return; readPalette(); R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg()); requestRender(); }
 
 /* ------------------------------------------------------------------ corner eyes: tuck away the group in each corner */
 const CORNERS = { tl: "tl", tr: "dock", bl: "bl", br: "br" };
@@ -1508,7 +1561,8 @@ const OPTIONS = [
   { t: "Label all atoms", sel: "#label-all", k: "label all labels every atom names symbols", self: true, before: () => setLabelMode(true) },
   { t: "Reset view", sel: "#btn-reset", k: "reset view fit home recenter camera", self: true },
   { t: "Open files", sel: "#btn-open", k: "open load import file replace", self: true },
-  { t: "Save image", sel: "#btn-snap", k: "save image screenshot png picture snapshot export", self: true },
+  { t: "Photo: save an image of the view", sel: "#btn-photo", k: "photo save image screenshot png picture snapshot export copy transparent high resolution print", self: true },
+  { t: "Embed in your website, use in Jupyter or Julia", sel: "#btn-use", k: "embed iframe website share jupyter julia notebook python pluto use elsewhere", self: true },
   { t: "New scene", sel: "#btn-new", k: "new scene clear start over reset", self: true },
   { t: "Brillouin zone", sel: "#bz", k: "brillouin zone reciprocal k-path kpath high symmetry points band structure bz wigner seitz" },
   { t: "Slice", sel: "#slice", k: "slice 2d cut plane section contour map hkl miller cross section" },
@@ -1650,9 +1704,13 @@ $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStru
 $("species").addEventListener("change", e => {
   const el = e.target.dataset.el;
   if (!el) return;
+  if (e.target.type === "color") { S.colors.set(el, e.target.value); recolor(); speciesUI(); return; }
   if (e.target.checked) S.hide.delete(el); else S.hide.add(el);
   buildStructure(); summaries();
 });
+// live colour while the picker is open
+$("species").addEventListener("input", e => { if (e.target.type === "color" && e.target.dataset.el) { S.colors.set(e.target.dataset.el, e.target.value); recolor(); } });
+$("species").addEventListener("click", e => { const b = e.target.closest(".sp-rs"); if (b) { S.colors.delete(b.dataset.el); speciesUI(); recolor(); } });
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
   S.reps[i] = Math.min(6, Math.max(1, Math.round(+e.target.value) || 1)); e.target.value = S.reps[i];
@@ -1693,10 +1751,12 @@ $("cuts-clear").addEventListener("click", () => {
 });
 for (const b of document.querySelectorAll("[data-along]")) b.addEventListener("click", () => viewAlong(+b.dataset.along));
 $("btn-reset").addEventListener("click", resetView);
-$("btn-snap").addEventListener("click", snapshot);
 $("btn-home").addEventListener("click", showHome);
 $("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
 $("e-region").addEventListener("click", () => setBoxMode(!S.boxMode));
+// colour of the selected atoms: live while the picker is open
+$("atom-color").addEventListener("input", e => { for (const s of S.sel) { const L = layerById(s.layer); if (L) S.atomColors.set(atomKey(L, s.src), e.target.value); } recolor(); });
+$("atom-color").addEventListener("change", () => updateSelectionBar());
 $("measure").addEventListener("click", e => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
@@ -1704,6 +1764,12 @@ $("measure").addEventListener("click", e => {
   if (a === "center") centerOnSelected();
   else if (a === "delete") deleteSelected();
   else if (a === "cut") cutSurface();
+  else if (a === "color") {
+    const inp = $("atom-color"), s0 = S.sel[0];
+    inp.value = s0 ? atomColor(layerById(s0.layer), disp.atoms[s0.i] || { el: "X", src: s0.src }) : "#888888";
+    try { inp.showPicker(); } catch (err) { inp.click(); }
+  }
+  else if (a === "uncolor") { for (const s of S.sel) S.atomColors.delete(atomKey(layerById(s.layer), s.src)); recolor(); updateSelectionBar(); }
   else if (a === "edit") { tuck("tr", false); $("sec-edit").open = true; $("sec-edit").scrollIntoView({ block: "nearest" }); }
 });
 $("pl-play").addEventListener("click", () => play(!S.playing));
@@ -1761,7 +1827,8 @@ window.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (k === "o") pick("replace");
   else if (k === "escape") {
-    if (!$("spot").hidden) closeSearch();
+    if (PH.on) setPhoto(false);
+    else if (!$("spot").hidden) closeSearch();
     else if (!$("empty").hidden && S.layers.length) $("empty").hidden = true;
     else if (S.labelMode) setLabelMode(false);
     else if (S.sel.length || S.region) clearSelection();
@@ -1771,7 +1838,7 @@ window.addEventListener("keydown", e => {
   else if (!S.layers.length || !$("empty").hidden) return;
   else if ((k === "delete" || k === "backspace") && S.sel.length) { e.preventDefault(); deleteSelected(); }
   else if (k === "r") resetView();
-  else if (k === "s") snapshot();
+  else if (k === "s") { if (PH.on) savePhoto(); else setPhoto(true); }
   else if (k === "l") setLabelMode(!S.labelMode);
   else if (k === "k" && primaryCell() && primaryCell().pbc) setBZ(!S.bz);
   else if (k === "h") tuckAll();
@@ -1795,12 +1862,13 @@ function setBZ(on) {
     let k = null;
     try { k = st && kpath(st, tol); } catch (e) { console.error(e); }
     if (!k) { $("bz").checked = false; toast("The Brillouin zone needs a periodic structure.", true); return; }
-    S.bzData = { k, zone: wignerSeitz(k.B), name: itemOf(L).name };
+    S.bzData = { k, zone: wignerSeitz(k.B), name: itemOf(L).name, layer: L.id };
     S.bzCam = { q: cam.q.slice(), target: cam.target.slice(), dist: cam.dist, radius: cam.radius };
     S.bz = true;
   } else {
     S.bz = false; S.bzData = null;
     if (R) { R.removeMeshGroup("bz"); R.setLabels && uploadLabels(); }
+    buildInset();
   }
   $("bz").checked = S.bz;
   buildStructure(); refreshSurfaces();
@@ -1842,10 +1910,210 @@ function buildBZ() {
   if (R.setLabels) { const atlas = buildAtlas(labels.map(l => l.text)); R.setLabels(packLabels(labels, atlas ? atlas.map : {}), atlas ? labels.length : 0, atlas); }
   updateSelectionBar();
   const pathText = k.path.map(r => r.map(kLabel).join("–")).join(" | ");
+  buildInset();
   $("info").textContent = `Brillouin zone of ${S.bzData.name} · ${k.variant.toUpperCase()} · ${pathText} · |b| ${k.B.map(b => norm(b).toFixed(3)).join(" ")} Å⁻¹`;
   requestRender();
 }
 $("bz").addEventListener("change", e => setBZ(e.target.checked));
+
+/* ------------------------------------------------------------------ Brillouin zone: crystal inset */
+// The crystal of the zone in a small box (bottom left), drawn by a second renderer on its own canvas with the main
+// camera's rotation: the zone and the crystal share one Cartesian frame (b_i . a_j = 2 pi delta_ij), so the same
+// rotation shows both from the same direction. Dragging in the box turns both; the wheel zooms the box; the corner
+// grip resizes it (kept in localStorage).
+const BZI = { R: null, cam: new Camera(), size: 220, on: true, zoom: 1, starting: false };
+try { const v = +localStorage.getItem("isoview-bzi-size"); if (v >= 120) BZI.size = v; BZI.on = localStorage.getItem("isoview-bzi") !== "0"; } catch (e) { /* storage unavailable */ }
+$("bzi").checked = BZI.on;
+/** Side of the box in CSS px: the stored size, at most half the window width and 70% of its height. */
+const insetSide = () => Math.round(Math.max(120, Math.min(BZI.size, window.innerWidth * 0.5, window.innerHeight * 0.7)));
+/** Shows, hides or refills the inset (atoms, bonds and cell of the zone's structure as drawn before the zone view). */
+async function buildInset() {
+  const box = $("bzinset"), show = !!(S.bz && BZI.on && S.bzData);
+  $("row-bzi").hidden = !S.bz;
+  box.hidden = !show;
+  if (!show) return;
+  if (!BZI.R) {
+    if (BZI.starting) return;
+    BZI.starting = true;
+    const cv = $("bzi-cv");
+    try { BZI.R = globalThis.__isoviewRenderer ? await globalThis.__isoviewRenderer(cv) : await createRenderer(cv, null, R && R.name === "WebGL2" ? "webgl2" : ""); }
+    catch (e) { BZI.R = null; }
+    BZI.starting = false;
+    if (!BZI.R) { box.hidden = true; return; }
+    if (BZI.R.canvas && BZI.R.canvas !== cv) BZI.R.canvas.id = "bzi-cv";
+    if (!S.bz) { box.hidden = true; return; }
+  }
+  const L = layerById(S.bzData.layer);
+  if (!L) { box.hidden = true; return; }
+  const { atoms, bonds, segs } = structureScene([L], [L]), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const add = p => { for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } };
+  for (const a of atoms) add([a.x, a.y, a.z]);
+  for (const s of segs) { add(s.p0); add(s.p1); }
+  if (Number.isFinite(lo[0])) BZI.cam.fit(lo.map((v, i) => (v + hi[i]) / 2), Math.max(1, 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])));
+  BZI.cam.dist *= BZI.zoom;
+  BZI.R.setBackground(liveBg());
+  BZI.R.setAtoms(packAtoms(atoms), atoms.length);
+  BZI.R.setBonds(packBonds(bonds), bonds.length);
+  BZI.R.setLines(packLines(segs), segs.length);
+  $("bzi-t").textContent = itemOf(L).name;
+  sizeInset();
+}
+/** Box and canvas size (device pixels at up to 2 per CSS pixel), then a redraw. */
+function sizeInset() {
+  const s = insetSide(), cv = BZI.R ? BZI.R.canvas : $("bzi-cv"), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  $("bzinset").style.setProperty("--bzi", s + "px");
+  cv.width = cv.height = Math.round(s * dpr);
+  BZI.cam.w = BZI.cam.h = s;
+  requestRender();
+}
+/** The inset drawn with the main camera's rotation and projection (into its own canvas, or into target r). */
+function drawInset(r = BZI.R, w = r.canvas.width, h = r.canvas.height, bg = liveBg()) {
+  const c = BZI.cam;
+  c.q = cam.q.slice(); c.ortho = cam.ortho;
+  r.draw(uniformsFor(c, r, w, h, bg));
+}
+$("bzi").addEventListener("change", e => {
+  BZI.on = e.target.checked;
+  try { localStorage.setItem("isoview-bzi", BZI.on ? "1" : "0"); } catch (err) { /* storage unavailable */ }
+  buildInset();
+});
+$("bzi-x").addEventListener("click", () => { $("bzi").checked = false; $("bzi").dispatchEvent(new Event("change")); });
+$("bzi-cv").addEventListener("pointerdown", e => {
+  const cv = e.currentTarget;
+  let x = e.clientX, y = e.clientY;
+  cv.setPointerCapture(e.pointerId); cv.classList.add("drag");
+  const move = ev => { cam.rotateBy(ev.clientX - x, ev.clientY - y); x = ev.clientX; y = ev.clientY; requestRender(); drawTriad(); };
+  const up = () => { cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); cv.classList.remove("drag"); };
+  cv.addEventListener("pointermove", move); cv.addEventListener("pointerup", up);
+});
+$("bzi-cv").addEventListener("wheel", e => {
+  e.preventDefault();
+  const f = Math.exp(Math.sign(e.deltaY) * 0.12);
+  BZI.zoom = Math.min(4, Math.max(0.25, BZI.zoom * f)); BZI.cam.dist *= f; requestRender();
+}, { passive: false });
+$("bzi-grip").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const g = e.currentTarget, x0 = e.clientX, y0 = e.clientY, s0 = insetSide();
+  g.setPointerCapture(e.pointerId);
+  // the box is anchored at its bottom left corner: dragging the top right corner up or right enlarges it
+  const move = ev => { BZI.size = Math.max(120, s0 + Math.max(ev.clientX - x0, y0 - ev.clientY)); sizeInset(); };
+  const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); try { localStorage.setItem("isoview-bzi-size", String(insetSide())); } catch (err) { /* storage unavailable */ } };
+  g.addEventListener("pointermove", move); g.addEventListener("pointerup", up);
+});
+window.addEventListener("resize", () => { if (S.bz && BZI.R && !$("bzinset").hidden) sizeInset(); });
+
+/* ------------------------------------------------------------------ photo mode */
+// One place for images of the 3D view. Photo (title bar, or S) hides every control and draws the view supersampled;
+// Save PNG and Copy render it again at the chosen size. The image is drawn in tiles of at most PH_TILE device px, each
+// with an off-centre projection (uniformsFor tile), at PH_SS times the output size and averaged down, so sphere and
+// bond edges are smooth and the GPU holds one tile at a time. A transparent background comes from two renders, on
+// black (C_0 = a F) and on white (C_1 = a F + (1 - a)): a = 1 - mean over r, g, b of (C_1 - C_0), F = C_0 / a.
+// In the Brillouin-zone view the crystal inset goes into the image where it shows.
+const PH = { on: false, size: "2", bg: "scene" };
+const PH_SS = 2, PH_TILE = 2048, PH_MAXPX = 16e6, PH_LIVE = 6e6; // PH_MAXPX: the largest 2D canvas Safari allows (2^24 px)
+try { const v = JSON.parse(localStorage.getItem("isoview-photo") || "{}"); if (["screen", "2", "4"].includes(v.size)) PH.size = v.size; if (["scene", "white", "clear"].includes(v.bg)) PH.bg = v.bg; } catch (e) { /* storage unavailable */ }
+/** Background of the live view: white while photo mode shows a white-background photo, else the theme's. */
+function liveBg() { return PH.on && PH.bg === "white" ? [1, 1, 1] : pal.bg; }
+/** Output size: the window (CSS px) times the chosen scale (Screen: the device pixel ratio), at most PH_MAXPX px. */
+function photoSize() {
+  const k0 = PH.size === "screen" ? (window.devicePixelRatio || 1) : +PH.size, k = Math.min(k0, Math.sqrt(PH_MAXPX / (cam.w * cam.h)));
+  return { w: Math.round(cam.w * k), h: Math.round(cam.h * k) };
+}
+function setPhoto(on) {
+  if (on === !!PH.on || (on && (!R || !S.layers.length))) return;
+  PH.on = on;
+  document.body.classList.toggle("photo", on);
+  $("photobar").hidden = !on;
+  if (on) { showUse(null); photoUI(); }
+  if (!S.bz && disp.atoms.length) uploadAtoms();
+  R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg());
+  resize(); if (S.bz && BZI.R) sizeInset();
+}
+function photoUI() {
+  for (const b of $("ph-size").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === PH.size));
+  for (const b of $("ph-bg").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === PH.bg));
+  const { w, h } = photoSize();
+  $("ph-px").textContent = `${w} × ${h} px`;
+}
+/** a = 1 - mean(C_1 - C_0), F = C_0 / a, into A (ImageData on black); B: the same pixels on white. */
+function matte(A, B) {
+  const a = A.data, b = B.data;
+  for (let i = 0; i < a.length; i += 4) {
+    const al = Math.min(1, 1 - (b[i] - a[i] + b[i + 1] - a[i + 1] + b[i + 2] - a[i + 2]) / 765);
+    if (al < 0.004) { a[i] = a[i + 1] = a[i + 2] = a[i + 3] = 0; continue; }
+    a[i] = Math.min(255, a[i] / al); a[i + 1] = Math.min(255, a[i + 1] / al); a[i + 2] = Math.min(255, a[i + 2] / al); a[i + 3] = Math.round(255 * al);
+  }
+}
+/** Draws the view of camera c on renderer r into the 2D context g, as an ow x oh px image at (dx, dy): tiles of the
+ *  PH_SS-times larger image, each averaged down into place. bgs: one background, or black and white for matting. */
+function drawTiles(r, c, g, dx, dy, ow, oh, bgs) {
+  const VW = ow * PH_SS, VH = oh * PH_SS, T = Math.min(PH_TILE, r.maxSide || PH_TILE) - (Math.min(PH_TILE, r.maxSide || PH_TILE) % PH_SS);
+  const tmp = bgs.length > 1 ? [document.createElement("canvas"), document.createElement("canvas")] : null;
+  for (let py = 0; py < VH; py += T) for (let px = 0; px < VW; px += T) {
+    const tw = Math.min(T, VW - px), th = Math.min(T, VH - py), tile = [px, py, VW, VH], ox = dx + px / PH_SS, oy = dy + py / PH_SS, w2 = tw / PH_SS, h2 = th / PH_SS;
+    r.canvas.width = tw; r.canvas.height = th;
+    const shots = bgs.map((bg, i) => {
+      r.setBackground(bg);
+      r.draw(uniformsFor(c, r, tw, th, bg, VW / c.w, tile));
+      if (!tmp) { g.drawImage(r.canvas, 0, 0, tw, th, ox, oy, w2, h2); return null; }
+      const t = tmp[i]; t.width = w2; t.height = h2;
+      const tg = t.getContext("2d"); tg.imageSmoothingQuality = "high"; tg.drawImage(r.canvas, 0, 0, tw, th, 0, 0, w2, h2);
+      return tg.getImageData(0, 0, w2, h2);
+    });
+    if (tmp) { matte(shots[0], shots[1]); g.putImageData(shots[0], ox, oy); }
+  }
+  r.setBackground(liveBg());
+}
+/** The photo as a canvas, at photoSize(); the live view is restored afterwards. */
+function renderPhoto() {
+  const { w, h } = photoSize(), out = document.createElement("canvas");
+  out.width = w; out.height = h;
+  const g = out.getContext("2d"), bgs = PH.bg === "clear" ? [[0, 0, 0], [1, 1, 1]] : [PH.bg === "white" ? [1, 1, 1] : pal.bg];
+  g.imageSmoothingQuality = "high";
+  try {
+    drawTiles(R, cam, g, 0, 0, w, h, bgs);
+    if (S.bz && BZI.R && !$("bzinset").hidden) {
+      const b = $("bzinset").getBoundingClientRect(), s = w / cam.w, x = Math.round(b.left * s), y = Math.round(b.top * s), side = Math.round(b.width * s);
+      BZI.cam.q = cam.q.slice(); BZI.cam.ortho = cam.ortho;
+      drawTiles(BZI.R, BZI.cam, g, x, y, side, side, bgs);
+      g.strokeStyle = css("--line2") || "#c8ccd2"; g.lineWidth = Math.max(1, s); g.strokeRect(x + g.lineWidth / 2, y + g.lineWidth / 2, side - g.lineWidth, side - g.lineWidth);
+    }
+  } finally {
+    resize(); if (S.bz && BZI.R) sizeInset();
+    frame();
+  }
+  return out;
+}
+const photoName = () => ($("doc-name").textContent.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png";
+function savePhoto() {
+  if (!PH.on || !R) return;
+  let out;
+  try { out = renderPhoto(); } catch (e) { toast("Could not draw the image: " + (e.message || e), true); return; }
+  out.toBlob(b => (b ? download(b, photoName()) : toast("Could not encode the image (too large for this browser?).", true)), "image/png");
+}
+function copyPhoto() {
+  if (!PH.on || !R) return;
+  if (!navigator.clipboard || !window.ClipboardItem) { toast("This browser cannot copy images; use Save PNG.", true); return; }
+  let out;
+  try { out = renderPhoto(); } catch (e) { toast("Could not draw the image: " + (e.message || e), true); return; }
+  // WHY: the blob is handed over as a promise so the copy still counts as part of the click
+  navigator.clipboard.write([new ClipboardItem({ "image/png": new Promise(res => out.toBlob(res, "image/png")) })])
+    .then(() => toast("Copied the image."), e => toast("Could not copy: " + (e.message || e), true));
+}
+const savePhotoPrefs = () => { try { localStorage.setItem("isoview-photo", JSON.stringify({ size: PH.size, bg: PH.bg })); } catch (e) { /* storage unavailable */ } };
+$("btn-photo").addEventListener("click", () => setPhoto(true));
+$("ph-done").addEventListener("click", () => setPhoto(false));
+$("ph-save").addEventListener("click", savePhoto);
+$("ph-copy").addEventListener("click", copyPhoto);
+$("ph-size").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { PH.size = b.value; photoUI(); savePhotoPrefs(); } });
+$("ph-bg").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  PH.bg = b.value; photoUI(); savePhotoPrefs();
+  R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg());
+  requestRender();
+});
+window.addEventListener("resize", () => { if (PH.on) photoUI(); });
 
 /* ------------------------------------------------------------------ 2D slices */
 const SL_NEAR = 0.8; // A: atoms closer than this to the plane are drawn on the slice
@@ -1951,7 +2219,7 @@ function drawSliceFigure(ctx, w, h, lw = 1) {
     const k = w / P.width;
     for (const a of sliceAtoms(P)) {
       ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * lw, a.rad * k), 0, 2 * Math.PI);
-      ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = colorOf(a.el); ctx.fill();
+      ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = elColor(a.el); ctx.fill();
       ctx.lineWidth = 1 * lw; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
     }
   }
@@ -1999,7 +2267,7 @@ function sliceSVG() {
     if (d) parts.push(`<path d="${d}" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"${c < 0 ? ' stroke-dasharray="4 3"' : ""}/>`);
   }
   parts.push(`<polygon points="${P.poly.map(([s, r]) => `${X(s)},${Y(r)}`).join(" ")}" fill="none" stroke="#000" stroke-opacity="0.45"/>`);
-  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${colorOf(a.el)}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
+  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${elColor(a.el)}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
   const t = lut(st.map), stops = [];
   for (let i = 0; i <= 16; i++) { const k = Math.round(255 * i / 16); stops.push(`<stop offset="${(i / 16).toFixed(4)}" stop-color="rgb(${t[3 * k]},${t[3 * k + 1]},${t[3 * k + 2]})"/>`); }
   const m = Math.max(Math.abs(st.lo), Math.abs(st.hi)), top = st.mode === "signed" ? m : st.hi, bot = st.mode === "signed" ? -m : st.lo;
@@ -2040,7 +2308,9 @@ $("sl-head").addEventListener("pointerdown", e => {
 window.addEventListener("resize", () => { if (SL.on) drawSliceWindow(); });
 
 /* ------------------------------------------------------------------ trajectory analysis */
-const AN = { kind: "rdf", rmax: 8, qty: "temperature", freq: "THz", res: null, seq: 0 };
+// off: per tab, the curves switched off (by key); fq: the per-frame quantities shown
+// fmax: upper end of the VDOS axis in THz (null: automatic)
+const AN = { kind: "rdf", rmax: 8, freq: "THz", fmax: null, res: null, seq: 0, off: { rdf: new Set(), msd: new Set(), vacf: new Set() }, fq: new Set(["temperature"]) };
 const AN_COLORS = ["#3058d0", "#e3a03a", "#2bb3a3", "#d6456a", "#7cb342", "#9b7be0", "#ef7d4b", "#5c9bd6", "#a0785a", "#c05fb0"];
 const AN_TOTAL = "#6b7280";
 const THZ_TO_CM = 33.35641; // cm^-1 per THz
@@ -2071,8 +2341,8 @@ async function runAnalysis() {
   if (!it || $("anwin").hidden) return;
   const dt_fs = anDt(), seq = ++AN.seq;
   AN.res = null; $("an-res").textContent = "";
-  if (AN.kind === "vacf" && !dt_fs) { $("an-plot").innerHTML = '<div class="an-wait">The VDOS needs the time between saved frames: set Time step in the Trajectory panel.</div>'; return; }
-  $("an-plot").innerHTML = '<div class="an-wait">Computing…</div>';
+  if (AN.kind === "vacf" && !dt_fs) { $("an-keys").innerHTML = ""; $("an-plot").innerHTML = '<div class="an-wait">The VDOS needs the time between saved frames: set Time step in the Trajectory panel.</div>'; return; }
+  $("an-plot").innerHTML = '<div class="an-wait">Computing…</div>'; $("an-keys").innerHTML = "";
   const { structure, traj } = anData(it);
   try {
     const r = await call("analysis", { kind: AN.kind, structure, traj, opts: AN.kind === "rdf" ? { rmax: AN.rmax } : { dt_fs } });
@@ -2085,11 +2355,8 @@ async function runAnalysis() {
 function anOptions() {
   const o = $("an-opts");
   if (AN.kind === "rdf") o.innerHTML = `<label>r max <input type="number" id="an-rmax" min="1" max="30" step="0.5" value="${AN.rmax}"> Å</label>`;
-  else if (AN.kind === "vacf") o.innerHTML = `<div class="seg2" id="an-freq"><button type="button" value="THz" aria-pressed="${AN.freq === "THz"}">THz</button><button type="button" value="cm" aria-pressed="${AN.freq === "cm"}">cm⁻¹</button></div>`;
-  else if (AN.kind === "frames") {
-    const r = AN.res && AN.res.kind === "frames" ? AN.res.r : null, Q = [["temperature", "temperature"], ["energy", "energy"], ["volume", "volume"], ["density", "density"], ["a", "a"], ["b", "b"], ["c", "c"]];
-    o.innerHTML = `<select id="an-qty" aria-label="Quantity">${Q.filter(([k]) => !r || r[k]).map(([k, t]) => `<option value="${k}"${k === AN.qty ? " selected" : ""}>${t}</option>`).join("")}</select>`;
-  } else o.innerHTML = "";
+  else if (AN.kind === "vacf") o.innerHTML = `<div class="seg2" id="an-freq"><button type="button" value="THz" aria-pressed="${AN.freq === "THz"}">THz</button><button type="button" value="cm" aria-pressed="${AN.freq === "cm"}">cm⁻¹</button></div><label>up to <input type="number" id="an-fmax" min="0" step="any" placeholder="auto" value="${AN.fmax ? +(AN.fmax * (AN.freq === "cm" ? THZ_TO_CM : 1)).toPrecision(4) : ""}"></label>`;
+  else o.innerHTML = "";
 }
 /** First peak of g(r) and the first minimum after it (indices), for coordination numbers. g is first smoothed by a
  *  running mean over +-w bins (w = 0.1 A / dr) so that noise does not end the shell early; the minimum is the lowest
@@ -2103,55 +2370,99 @@ function firstShell(g, dr) {
   for (let i = p + 1; i < sm.length; i++) { if (sm[i] < sm[m]) m = i; else if (sm[i] > sm[m] + 0.1 * sm[p]) break; }
   return { p, m };
 }
-/** Series, axis titles and a result text for the current result. */
+/** Series, axis titles and a result text for the current result: { panels: [{ series, ylabel, zero }], keys: [{ key,
+ *  label, color, dash, on }] (the curves the user can switch off), xlabel, xname (CSV), text }. Only curves that are
+ *  on are in panels and in the text; colours stay tied to the curve whichever others are off. */
 function anChart() {
-  const { kind, r } = AN.res, dt = anDt();
+  const { kind, r } = AN.res, off = AN.off[kind] || new Set(), keys = [], key = (k, label, color, dash) => { const on = !off.has(k); keys.push({ key: k, label, color, dash, on }); return on; };
   if (kind === "rdf") {
-    if (!r.total.g) return { series: [{ label: "all atoms", x: r.rEdge, y: r.total.n, color: AN_TOTAL }], xlabel: "r (Å)", ylabel: "neighbours within r", text: "No cell: neighbour counts instead of g(r)." };
-    const series = [{ label: "all", x: r.r, y: r.total.g, color: AN_TOTAL, width: 1.2 }], lines = [];
+    if (!r.total.g) return { panels: [{ series: [{ label: "all atoms", x: r.rEdge, y: r.total.n, color: AN_TOTAL }], ylabel: "neighbours within *r*" }], keys, xlabel: "*r* (Å)", text: "No cell: neighbour counts instead of g(r).", xname: "r (A)" };
+    const series = [], lines = [];
+    if (key("all", "all", AN_TOTAL)) series.push({ label: "all", x: r.r, y: r.total.g, color: AN_TOTAL, width: 1.2 });
     r.pairs.forEach((q, i) => {
-      series.push({ label: q.label, x: r.r, y: q.g, color: AN_COLORS[i % AN_COLORS.length] });
+      const c = AN_COLORS[i % AN_COLORS.length];
+      if (!key(q.label, q.label, c)) return;
+      series.push({ label: q.label, x: r.r, y: q.g, color: c });
       const { p, m } = firstShell(q.g, r.dr);
       if (q.g[p] > 0) lines.push(`${q.label.padEnd(7)} peak ${r.r[p].toFixed(2)} Å   ${q.b} around ${q.a}: ${q.nab[m].toFixed(2)}${q.a !== q.b ? `, ${q.a} around ${q.b}: ${q.nba[m].toFixed(2)}` : ""} (to ${r.rEdge[m].toFixed(2)} Å)`);
     });
-    return { series, xlabel: "r (Å)", ylabel: "g(r)", zero: true, text: lines.join("\n") + `\n${r.frames.length} frames averaged`, xname: "r (A)" };
+    lines.push(`${r.frames.length} frames averaged`);
+    return { panels: [{ series, ylabel: "*g*(*r*)", zero: true }], keys, xlabel: "*r* (Å)", xr: [0, r.rmax], text: lines.join("\n"), xname: "r (A)" };
   }
   if (kind === "msd") {
-    const ps = r.timeUnit === "ps", series = [], lines = [];
+    const ps = r.timeUnit === "ps", series = [], lines = [], fits = r.elements.some(e => Number.isFinite(e.slope));
+    r.elements.forEach((e, i) => key(e.el, e.el, AN_COLORS[i % AN_COLORS.length]));
+    const showFits = fits && key("fits", "fits", AN_TOTAL, true);
     r.elements.forEach((e, i) => {
+      if (off.has(e.el)) return;
       const c = AN_COLORS[i % AN_COLORS.length];
       series.push({ label: e.el, x: r.t, y: e.msd, color: c });
-      if (Number.isFinite(e.slope)) series.push({ label: "", x: e.fit, y: e.fit.map(t => e.slope * t + e.intercept), color: c, dash: true, width: 1 });
+      if (showFits && Number.isFinite(e.slope)) series.push({ label: "", x: e.fit, y: e.fit.map(t => e.slope * t + e.intercept), color: c, dash: true, width: 1 });
       lines.push(ps && e.D_cm2s != null ? `${e.el.padEnd(3)} D = ${e.D_cm2s.toExponential(2)} cm²/s  (${e.D_A2ps.toPrecision(3)} Å²/ps, ${e.count} atoms)` : `${e.el.padEnd(3)} ${e.count} atoms`);
     });
     if (!ps) lines.push("Set Time step (Trajectory panel) for the time axis and D.");
     else lines.push(`fit over ${r.elements[0] ? r.elements[0].fit.map(t => t.toPrecision(3)).join("–") : ""} ps (dashed); drift ${r.removeDrift ? "removed" : "kept"}`);
-    return { series, xlabel: ps ? "t (ps)" : "lag (frames)", ylabel: "MSD (Å²)", zero: true, text: lines.join("\n"), xname: ps ? "t (ps)" : "lag (frames)" };
+    return { panels: [{ series, ylabel: "MSD (Å²)", zero: true }], keys, xlabel: ps ? "*t* (ps)" : "lag (frames)", text: lines.join("\n"), xname: ps ? "t (ps)" : "lag (frames)" };
   }
   if (kind === "vacf") {
-    const cm = AN.freq === "cm", x = cm ? r.nu_cm : r.nu_THz, k = cm ? 1 / THZ_TO_CM : 1;
-    const series = [{ label: "total", x, y: Array.from(r.total.vdos, v => v * k), color: AN_TOTAL, width: 1.2 }];
-    if (r.elements.length > 1) r.elements.forEach((e, i) => series.push({ label: e.el, x, y: Array.from(e.vdos, v => v * k), color: AN_COLORS[i % AN_COLORS.length] }));
-    const f = v => (cm ? `${(v * THZ_TO_CM).toFixed(0)} cm⁻¹` : `${v.toPrecision(3)} THz`);
-    return { series, xlabel: cm ? "frequency (cm⁻¹)" : "frequency (THz)", ylabel: cm ? "VDOS (1/cm⁻¹)" : "VDOS (1/THz)", zero: true,
+    const cm = AN.freq === "cm", x = cm ? r.nu_cm : r.nu_THz, k = cm ? 1 / THZ_TO_CM : 1, series = [];
+    if (key("total", "total", AN_TOTAL)) series.push({ label: "total", x, y: Array.from(r.total.vdos, v => v * k), color: AN_TOTAL, width: 1.2 });
+    if (r.elements.length > 1) r.elements.forEach((e, i) => { const c = AN_COLORS[i % AN_COLORS.length]; if (key(e.el, e.el, c)) series.push({ label: e.el, x, y: Array.from(e.vdos, v => v * k), color: c }); });
+    const f = v => (cm ? `${(v * THZ_TO_CM).toFixed(0)} cm⁻¹` : `${v.toPrecision(3)} THz`), top = (AN.fmax || vdosEnd(r)) * (cm ? THZ_TO_CM : 1);
+    return { panels: [{ series, ylabel: cm ? "VDOS (1/cm⁻¹)" : "VDOS (1/THz)", zero: true }], keys, xlabel: cm ? "frequency (cm⁻¹)" : "frequency (THz)", xr: [0, top],
       text: `resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
   }
-  const Q = { temperature: ["temperature estimate (K)", "K"], energy: ["energy (eV)", "eV"], volume: ["volume (Å³)", "Å³"], density: ["density (g/cm³)", "g/cm³"], a: ["a (Å)", "Å"], b: ["b (Å)", "Å"], c: ["c (Å)", "Å"] };
-  let q = AN.qty;
-  if (!r[q]) q = Object.keys(Q).find(k => r[k]) || "energy";
-  const y = r[q] || [], x = r.t ? Array.from(r.t) : Array.from({ length: r.n }, (_, i) => i + 1);
-  const vals = Array.from(y).filter(Number.isFinite), mean = vals.reduce((a, v) => a + v, 0) / (vals.length || 1);
-  let sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, vals.length - 1));
-  if (sd < 1e-9 * Math.abs(mean)) sd = 0; // a fixed cell: rounding only
-  let text = vals.length ? `mean ${fmt(mean)} ± ${fmt(sd)} ${Q[q][1]} over ${vals.length} frames` : "Not available for this file.";
-  if (q === "temperature") text += vals.length ? "\nfrom finite differences of saved positions: right only when every MD step (or every other) is saved" : "\nneeds the time step (Trajectory panel)";
-  return { series: [{ label: q, x, y: Array.from(y), color: AN_COLORS[0] }], xlabel: r.t ? "t (ps)" : "frame", ylabel: Q[q][0], text, xname: r.t ? "t (ps)" : "frame" };
+  // per frame: each chosen quantity in its own panel over a shared time axis; a, b, c share one panel
+  const have = AN_Q.filter(q => r[q.k] && Array.from(r[q.k]).some(Number.isFinite));
+  if (!have.some(q => AN.fq.has(q.k)) && have.length) AN.fq.add(have[0].k);
+  const x = r.t ? Array.from(r.t) : Array.from({ length: r.n }, (_, i) => i + 1), panels = [], lines = [];
+  let cell = null;
+  for (const q of have) {
+    const on = AN.fq.has(q.k);
+    keys.push({ key: q.k, label: q.k, color: q.c, on });
+    if (!on) continue;
+    const y = Array.from(r[q.k]), vals = y.filter(Number.isFinite), mean = vals.reduce((a, v) => a + v, 0) / vals.length;
+    let sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, vals.length - 1));
+    if (sd < 1e-9 * Math.abs(mean)) sd = 0; // a fixed cell: rounding only
+    lines.push(`${q.k.padEnd(11)} mean ${fmt(mean)} ± ${fmt(sd)} ${q.u} over ${vals.length} frames`);
+    const s = { label: q.cell ? q.k : `${q.k} (${q.u})`, x, y, color: q.c };
+    if (q.cell) { if (!cell) panels.push(cell = { series: [], ylabel: "cell length (Å)" }); cell.series.push(s); }
+    else panels.push({ series: [s], ylabel: q.t });
+  }
+  if (!have.length) lines.push("Not available for this file.");
+  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+  else if (!r.temperature) lines.push("temperature: needs the time step (Trajectory panel)");
+  return { panels, keys, xlabel: r.t ? "*t* (ps)" : "frame", text: lines.join("\n"), xname: r.t ? "t (ps)" : "frame" };
+}
+/** Automatic upper end of the VDOS axis (THz): 1.25 times the frequency below which 99.5% of the total VDOS lies
+ *  (cumulative sum over the frequency bins), at most the Nyquist frequency. WHY: the spectrum usually ends far below
+ *  the Nyquist frequency of the saved frames, and a figure up to it is mostly empty. */
+function vdosEnd(r) {
+  const g = r.total.vdos, nu = r.nu_THz;
+  let sum = 0, c = 0;
+  for (let i = 0; i < g.length; i++) sum += Math.max(0, g[i]);
+  for (let i = 0; i < g.length; i++) { c += Math.max(0, g[i]); if (c >= 0.995 * sum) return Math.min(r.nyquist_THz, 1.25 * nu[i]) || r.nyquist_THz; }
+  return r.nyquist_THz;
+}
+/** Quantities per frame: key, axis title, unit, colour; cell: drawn together in one panel. */
+const AN_Q = [
+  { k: "temperature", t: "temperature estimate (K)", u: "K" }, { k: "energy", t: "energy (eV)", u: "eV" }, { k: "volume", t: "volume (Å³)", u: "Å³" },
+  { k: "density", t: "density (g/cm³)", u: "g/cm³" }, { k: "a", t: "a (Å)", u: "Å", cell: true }, { k: "b", t: "b (Å)", u: "Å", cell: true }, { k: "c", t: "c (Å)", u: "Å", cell: true },
+].map((q, i) => ({ ...q, c: AN_COLORS[i % AN_COLORS.length] }));
+/** Chart options for the window (screen) or for a saved figure (paper: 3.5 in wide, the width of one journal column,
+ *  black ink, Helvetica; 11-unit tick labels print at about 8 pt). */
+function anFigure(c, paper) {
+  const k = Math.max(1, c.panels.length);
+  if (paper) { const W = 340, H = 240 + 92 * (k - 1); return { ...c, W, H, fs: 11, ink: "#000", font: "Helvetica, Arial, sans-serif", size: ["3.5in", `${(3.5 * H / W).toFixed(3)}in`] }; }
+  const big = $("anwin").classList.contains("big");
+  return { ...c, W: big ? 800 : 520, H: (big ? 420 : 300) + (big ? 150 : 110) * (k - 1), fs: big ? 12 : 11 };
 }
 function drawAnalysis() {
   if (!AN.res) return;
   anOptions();
-  const c = anChart(), big = $("anwin").classList.contains("big");
-  $("an-plot").innerHTML = lineChart({ ...c, W: big ? 800 : 520, H: big ? 420 : 300 });
+  const c = anChart();
+  $("an-plot").innerHTML = chart(anFigure(c, false));
+  $("an-keys").innerHTML = c.keys.length > 1 ? c.keys.map(q => `<button type="button" data-key="${esc(q.key)}" aria-pressed="${q.on}" title="${q.on ? "Hide" : "Show"} ${esc(q.label)}"><i class="${q.dash ? "d" : ""}" style="--c:${q.color}"></i>${esc(q.label)}</button>`).join("") : "";
   $("an-res").textContent = c.text || "";
 }
 $("an-open").addEventListener("click", e => { const b = e.target.closest("[data-an]"); if (b) openAnalysis(b.dataset.an); });
@@ -2160,13 +2471,35 @@ $("an-x").addEventListener("click", () => { $("anwin").hidden = true; AN.seq++; 
 $("an-big").addEventListener("click", () => { const on = !$("anwin").classList.contains("big"); $("anwin").classList.toggle("big", on); $("an-big").setAttribute("aria-pressed", String(on)); drawAnalysis(); });
 $("an-dt").addEventListener("change", () => { if (!$("anwin").hidden && AN.kind !== "rdf") runAnalysis(); });
 $("an-opts").addEventListener("change", e => {
+  if (e.target.id === "an-fmax") { const v = parseFloat(e.target.value); AN.fmax = v > 0 ? v / (AN.freq === "cm" ? THZ_TO_CM : 1) : null; drawAnalysis(); }
   if (e.target.id === "an-rmax") { AN.rmax = Math.min(30, Math.max(1, +e.target.value || 8)); runAnalysis(); }
-  if (e.target.id === "an-qty") { AN.qty = e.target.value; drawAnalysis(); }
 });
 $("an-opts").addEventListener("click", e => { const b = e.target.closest("#an-freq button"); if (b) { AN.freq = b.value; drawAnalysis(); } });
+// a curve chip switches its curve on or off; per frame, at least one quantity stays on
+$("an-keys").addEventListener("click", e => {
+  const b = e.target.closest("[data-key]");
+  if (!b || !AN.res) return;
+  const k = b.dataset.key, set = AN.res.kind === "frames" ? AN.fq : AN.off[AN.res.kind];
+  if (AN.res.kind === "frames" && set.has(k) && set.size === 1) return;
+  if (set.has(k)) set.delete(k); else set.add(k);
+  drawAnalysis();
+});
 const anFile = ext => `${(AN.res ? AN.res.name : "trajectory").replace(/[^\w.+-]+/g, "_")}-${AN.kind === "vacf" ? "vdos" : AN.kind}.${ext}`;
-$("an-csv").addEventListener("click", () => { if (!AN.res) return; const c = anChart(); download(new Blob([toCSV(c.series.filter(s => s.label), c.xname || "x")], { type: "text/csv" }), anFile("csv")); });
-$("an-svg").addEventListener("click", () => { if (!AN.res) return; download(new Blob([lineChart({ ...anChart(), W: 720, H: 420, ink: "#222", font: "Helvetica, Arial, sans-serif" })], { type: "image/svg+xml" }), anFile("svg")); });
+$("an-csv").addEventListener("click", () => { if (!AN.res) return; const c = anChart(); download(new Blob([toCSV(c.panels.flatMap(p => p.series).filter(s => s.label), c.xname || "x")], { type: "text/csv" }), anFile("csv")); });
+$("an-svg").addEventListener("click", () => { if (!AN.res) return; download(new Blob([chart(anFigure(anChart(), true))], { type: "image/svg+xml" }), anFile("svg")); });
+/** The saved figure as PNG at 600 dpi on white: the paper SVG drawn onto a canvas. */
+$("an-png").addEventListener("click", () => {
+  if (!AN.res) return;
+  const f = anFigure(anChart(), true), svg = chart(f), dpi = 600, w = Math.round(3.5 * dpi), h = Math.round(w * f.H / f.W);
+  const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  img.onload = () => {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    c.toBlob(b => download(b, anFile("png")), "image/png");
+  };
+  img.src = url;
+});
 $("an-head").addEventListener("pointerdown", e => {
   if (e.target.closest("button, input")) return;
   const win = $("anwin"), r = win.getBoundingClientRect(), x0 = e.clientX - r.left, y0 = e.clientY - r.top;
@@ -2182,23 +2515,41 @@ const SITE = "https://utkarsh.science/isoview/";
 const COPY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 const codeBlock = (t, id) => `<div class="code"><pre${id ? ` id="${id}"` : ""}>${esc(t)}</pre><button type="button" class="copy" title="Copy" aria-label="Copy">${COPY_SVG}</button></div>`;
 const embedSnippet = u => `<iframe src="${SITE}?embed&url=${encodeURIComponent(u || "https://example.org/files/CHGCAR")}" width="100%" height="480" style="border:0;border-radius:12px" loading="lazy" allowfullscreen></iframe>`;
+/** The files of the scene for the notebook snippets: names in quotes, at most three (default "CHGCAR"). */
+function useNames() {
+  const n = [...S.items.values()].flatMap(it => (it.files && it.files.length ? it.files.map(f => f.name) : [it.name])).filter(s => s && !/computed here/.test(s));
+  return n.length ? n.slice(0, 3) : ["CHGCAR"];
+}
+const pyArgs = () => useNames().map(s => JSON.stringify(s)).join(", ");
 const USE = {
-  web: ["Embed in your website", () => `<p>Show a structure, density or trajectory in any web page. The file's address:</p><input type="url" id="use-url" placeholder="https://example.org/files/CHGCAR" spellcheck="false" aria-label="Address of the file"><p class="lbl">Paste into your page</p>${codeBlock(embedSnippet(""), "use-snip")}<p class="fine2">The server with the file must allow cross-origin requests (GitHub Pages and raw.githubusercontent.com do). Visitors can turn it, open the panel and save images; the file is read in their browser.</p>`],
-  jupyter: ["Use in Jupyter", () => `<p class="lbl">Install</p>${codeBlock('pip install "isoview-notebook @ git+https://github.com/utksi/isoview#subdirectory=python"')}<p class="lbl">In a notebook</p>${codeBlock('import isoview\nisoview.show("CHGCAR")             # any file isoview opens\nisoview.show("WAVECAR", "CONTCAR")  # several files, one scene\nisoview.show(atoms)                 # ASE Atoms, pymatgen Structure')}<p class="fine2">JupyterLab, Notebook, VS Code and Colab. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
-  julia: ["Use in Julia", () => `<p class="lbl">Install</p>${codeBlock('using Pkg\nPkg.add(url="https://github.com/utksi/isoview", subdir="julia")')}<p class="lbl">In a notebook</p>${codeBlock('using Isoview\nisoview("CHGCAR")             # any file isoview opens\nisoview("WAVECAR", "CONTCAR")  # several files, one scene')}<p class="fine2">Pluto, IJulia (Jupyter) and VS Code. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
+  web: ["Embed in your website", () => `<p>Show a structure, density or trajectory in any web page. The file's address:</p><input type="url" id="use-url" placeholder="https://example.org/files/CHGCAR" spellcheck="false" aria-label="Address of the file" value="${esc(S.layers.length && S.srcUrl ? S.srcUrl : "")}"><p class="lbl">Paste into your page</p>${codeBlock(embedSnippet(""), "use-snip")}<p class="fine2">The server with the file must allow cross-origin requests (GitHub Pages and raw.githubusercontent.com do). Visitors can turn it, open the panel and save images; the file is read in their browser.</p>`],
+  jupyter: ["Use in Jupyter", () => `<p class="lbl">Install</p>${codeBlock('pip install "isoview-notebook @ git+https://github.com/utksi/isoview#subdirectory=python"')}<p class="lbl">In a notebook</p>${codeBlock(S.layers.length ? `import isoview\nisoview.show(${pyArgs()})\nisoview.show(atoms)  # ASE Atoms, pymatgen Structure` : 'import isoview\nisoview.show("CHGCAR")             # any file isoview opens\nisoview.show("WAVECAR", "CONTCAR")  # several files, one scene\nisoview.show(atoms)                 # ASE Atoms, pymatgen Structure')}<p class="fine2">JupyterLab, Notebook, VS Code and Colab. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
+  julia: ["Use in Julia", () => `<p class="lbl">Install</p>${codeBlock('using Pkg\nPkg.add(url="https://github.com/utksi/isoview", subdir="julia")')}<p class="lbl">In a notebook</p>${codeBlock(S.layers.length ? `using Isoview\nisoview(${pyArgs()})` : 'using Isoview\nisoview("CHGCAR")             # any file isoview opens\nisoview("WAVECAR", "CONTCAR")  # several files, one scene')}<p class="fine2">Pluto, IJulia (Jupyter) and VS Code. The viewer loads from this site and reads the files in your browser; nothing is uploaded.</p>`],
 };
 let useOpen = null;
-function showUse(key) {
+/** Opens card key (web, jupyter, julia) or closes it (null). From the opening page the card hangs below the row of
+ *  buttons; from a scene (the </> view button) it sits above the view buttons with tabs for the three cards. */
+function showUse(key, scene = false) {
   const pop = $("use-pop");
   for (const b of document.querySelectorAll("[data-use]")) b.setAttribute("aria-expanded", String(b.dataset.use === key));
+  $("btn-use").setAttribute("aria-expanded", String(!!key && scene));
   useOpen = key;
   if (!key) { pop.hidden = true; return; }
+  pop.classList.toggle("scene", scene);
+  $("use-tabs").hidden = !scene;
+  for (const b of $("use-tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === key));
   $("use-h").textContent = USE[key][0];
   $("use-body").innerHTML = USE[key][1]();
   pop.hidden = false;
   const u = $("use-url");
-  if (u) { u.addEventListener("input", () => { $("use-snip").textContent = embedSnippet(u.value.trim()); }); u.focus(); }
+  if (u) {
+    const upd = () => { $("use-snip").textContent = embedSnippet(u.value.trim()); };
+    u.addEventListener("input", upd); upd();
+    if (!u.value) u.focus();
+  }
 }
+$("btn-use").addEventListener("click", e => { e.stopPropagation(); showUse(useOpen && $("use-pop").classList.contains("scene") ? null : "web", true); });
+$("use-tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { e.stopPropagation(); showUse(b.value, true); } });
 for (const b of document.querySelectorAll("[data-use]")) b.addEventListener("click", e => { e.stopPropagation(); showUse(useOpen === b.dataset.use ? null : b.dataset.use); });
 $("use-x").addEventListener("click", () => showUse(null));
 $("use-pop").addEventListener("click", e => {
@@ -2207,13 +2558,13 @@ $("use-pop").addEventListener("click", e => {
   const t = c.parentElement.querySelector("pre").textContent;
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Copied."), () => toast("Select the text and copy it.", true));
 });
-document.addEventListener("click", e => { if (useOpen && !e.target.closest("#use-pop")) showUse(null); });
+document.addEventListener("click", e => { if (useOpen && !e.target.closest("#use-pop") && !e.target.closest("#btn-use")) showUse(null); });
 document.addEventListener("keydown", e => { if (useOpen && e.key === "Escape") { e.stopPropagation(); showUse(null); } }, true);
 
 startWorker();
 segState();
 // test hook (tests set globalThis.__isoviewTest before importing this module)
-if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, AN, cam, get disp() { return disp; } };
+if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, AN, cam, serialize, get disp() { return disp; } };
 /* ------------------------------------------------------------------ embedding */
 /**
  * Embedded mode (?embed, in an iframe on a website or in a notebook): nothing is kept in or restored from this
@@ -2253,6 +2604,7 @@ if (qp.get("url")) {
   const u = qp.get("url");
   fetch(u).then(r => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.blob(); })
     .then(b => openFiles([new File([b], decodeURIComponent(u.split(/[?#]/)[0].split("/").pop() || "file"))], "replace"))
+    .then(() => { if (S.layers.length) S.srcUrl = u; })
     .catch(e => toast(`Could not fetch ${u}: ${e.message}. The server must allow cross-origin requests.`, true, 9000));
 } else if (qp.get("example")) example(qp.get("example"));
 else if (!EMBED) store.getState().then(st => { if (st && !S.layers.length) restoreScene(st, store.getFiles); });
