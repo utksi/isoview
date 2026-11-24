@@ -18,6 +18,10 @@
  *                                            long side capped at maxSide pixels)
  *   analysis { kind, structure, traj, opts } -> the result of analysis.js rdf / msd / vacf / perFrame (kind
  *                                            "rdf", "msd", "vacf", "frames") for that trajectory (sent each time)
+ *   xrd { mode: "one", structure, opts }  -> xrd.js xrdPattern of the structure (opts: lambda, range, fwhm), its hkl
+ *                                            named in the conventional cell (symmetry.js conventional, up to 400 atoms)
+ *   xrd { mode: "traj", structure, traj, opts }
+ *                                         -> xrd.js xrdTrajectory (frames, x, map, avg; map transferred)
  *   drop { ds }                           -> {}  (frees the dataset)
  *   symmetry { lattice, frac, numbers, symprec }
  *                                         -> { number, hm, hall } (space group by moyo, vendor/moyo; symprec in A)
@@ -27,13 +31,15 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=29";
-import { isUlm, parseAseTraj } from "./traj.js?v=29";
-import { Wavecar } from "./wavecar.js?v=29";
-import { stats, renderGrid, refine } from "./field.js?v=29";
-import { marchingCubes } from "./gfx/mc.js?v=29";
-import { slicePlane, sampleSlice } from "./slice.js?v=29";
-import { rdf, msd, vacf, perFrame } from "./analysis.js?v=29";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=30";
+import { isUlm, parseAseTraj } from "./traj.js?v=30";
+import { Wavecar } from "./wavecar.js?v=30";
+import { stats, renderGrid, refine } from "./field.js?v=30";
+import { marchingCubes } from "./gfx/mc.js?v=30";
+import { slicePlane, sampleSlice } from "./slice.js?v=30";
+import { rdf, msd, vacf, perFrame } from "./analysis.js?v=30";
+import { xrdPattern, xrdTrajectory } from "./xrd.js?v=30";
+import { conventional } from "./symmetry.js?v=30";
 
 const DS = new Map();
 let nextDs = 1;
@@ -102,6 +108,15 @@ export async function handle(msg) {
     if (!fn) throw new Error("unknown analysis " + msg.kind);
     return { result: fn(msg.structure, msg.traj, msg.opts || {}), transfer: [] };
   }
+  if (op === "xrd") {
+    const st = msg.structure, o = msg.opts || {};
+    if (msg.mode === "traj") { const r = xrdTrajectory(st, msg.traj, o); return { result: r, transfer: [r.map.buffer] }; }
+    let C = null;
+    // WHY: hkl are named in the conventional cell (a primitive fcc cell then shows 111, 220, ... as papers do);
+    // the symmetry search is skipped for large cells, whose own indices are used
+    if (st.species.length <= 400) { try { C = conventional({ ...st, pbc: true }, o.tol || 1e-3).structure.lattice; } catch (e) { C = null; } }
+    return { result: xrdPattern(st.lattice, st.species, st.pos, { ...o, C }), transfer: [] };
+  }
   if (op === "drop") { DS.delete(msg.ds); return { result: {}, transfer: [] }; }
   if (op === "symmetry") {
     const m = await moyoReady();
@@ -142,8 +157,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=29").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=29", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=30").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=30", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;

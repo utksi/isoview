@@ -10,6 +10,9 @@
  * minor ticks divide a major step into 5 (step 1 or 5 x 10^k) or 4 (step 2 x 10^k); a panel gets about one major y tick
  * per 4 font heights. A constant series is shown over +-2% of its value. Non-finite points break a line.
  * Axis titles may mark variables as *italic*.
+ * A panel may carry labels (text set vertically just above points, e.g. hkl over diffraction peaks; a label closer
+ * than 1.1 font heights to one already placed is skipped, so give them strongest first) and a heat map (an image
+ * stretched over [x0, x1] x [y0, y1] of the axes, with a colour bar of the given stops and end values at the right).
  */
 
 /** Major ticks covering [a, b]: about n values at a step of 1, 2 or 5 x 10^k. Returns { lo, hi, step, ticks, minor }
@@ -47,7 +50,9 @@ function range(series, xr) {
 /**
  * SVG of stacked line-chart panels over one x axis.
  * panels: [{ series: [{ label, x, y (arrays of equal length), color, dash (bool), width }], ylabel, yr: optional
- * [min, max], zero: include y = 0 }]; xlabel: x axis title; xr: optional [min, max]; W, H: size in SVG units;
+ * [min, max], zero: include y = 0, labels: [{ x, y, text }], heat: { href (image URL), x0, x1, y0, y1, stops: CSS
+ * colours from low to high, lo, hi: the values at the ends of the colour bar } }]; xlabel: x axis title; xr: optional
+ * [min, max]; W, H: size in SVG units;
  * fs: tick label size (titles fs + 1); ink: colour of frame and text ("currentColor" on screen); font: font family;
  * size: optional [width, height] strings for the root element (physical size of a saved figure), default W, H px.
  */
@@ -70,7 +75,7 @@ export function chart({ panels, xlabel = "", xr, W = 520, H = 300, fs = 11, ink 
     return p.yr ? { y0, y1, t } : { y0: t.lo, y1: t.hi, t };
   });
   const wide = Math.max(1, ...ys.flatMap(q => q.t.ticks.filter(v => v >= q.y0 - 1e-12 && v <= q.y1 + 1e-12).map(v => lab(v).length)));
-  const L = Math.round(fs * 1.9 + wide * fs * 0.6 + 8), R = Math.round(fs * 0.9), pw = W - L - R, tk = fs * 0.4, tm = fs * 0.22;
+  const bar = panels.some(p => p.heat), L = Math.round(fs * 1.9 + wide * fs * 0.6 + 8), R = Math.round(bar ? fs * 5 : fs * 0.9), pw = W - L - R, tk = fs * 0.4, tm = fs * 0.22;
   const X = x => L + (x - x0) / (x1 - x0) * pw;
   const o = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${size ? size[0] : W}" height="${size ? size[1] : H}" font-family="${esc(font)}" font-size="${fs}">`];
   const inX = v => v >= x0 - 1e-9 * (x1 - x0) && v <= x1 + 1e-9 * (x1 - x0);
@@ -91,6 +96,10 @@ export function chart({ panels, xlabel = "", xr, W = 520, H = 300, fs = 11, ink 
     o.push("</g>");
     o.push(`<clipPath id="${id}-${n}"><rect x="${L}" y="${top.toFixed(2)}" width="${pw}" height="${ph.toFixed(2)}"/></clipPath><g clip-path="url(#${id}-${n})" fill="none" stroke-linejoin="round" stroke-linecap="round">`);
     const pts = [];
+    if (p.heat && p.heat.href) {
+      const hx0 = X(p.heat.x0), hx1 = X(p.heat.x1), hy0 = Y(p.heat.y0), hy1 = Y(p.heat.y1);
+      o.push(`<image href="${esc(p.heat.href)}" x="${Math.min(hx0, hx1).toFixed(2)}" y="${Math.min(hy0, hy1).toFixed(2)}" width="${Math.abs(hx1 - hx0).toFixed(2)}" height="${Math.abs(hy1 - hy0).toFixed(2)}" preserveAspectRatio="none"/>`);
+    }
     for (const s of p.series) {
       let dd = "", pen = false;
       for (let i = 0; i < s.x.length; i++) {
@@ -102,7 +111,24 @@ export function chart({ panels, xlabel = "", xr, W = 520, H = 300, fs = 11, ink 
       if (dd) o.push(`<path d="${dd}" stroke="${s.color}" stroke-width="${s.width || 1.5}"${s.dash ? ` stroke-dasharray="${fs * 0.45} ${fs * 0.3}"` : ""}/>`);
     }
     o.push("</g>");
+    if (p.labels && p.labels.length) {
+      const placed = [], gapPx = fs * 1.1;
+      o.push(`<g fill="${ink}" font-size="${(fs * 0.8).toFixed(1)}">`);
+      for (const q of p.labels) {
+        const px = X(q.x), py = Y(q.y) - fs * 0.35;
+        if (px < L + fs * 0.4 || px > L + pw - fs * 0.9 || placed.some(v => Math.abs(v - px) < gapPx)) continue;
+        placed.push(px);
+        o.push(`<text transform="translate(${(px + fs * 0.28).toFixed(1)} ${py.toFixed(1)}) rotate(-90)">${rich(q.text)}</text>`);
+      }
+      o.push("</g>");
+    }
     o.push(`<rect x="${L}" y="${top.toFixed(2)}" width="${pw}" height="${ph.toFixed(2)}" fill="none" stroke="${ink}" stroke-width="0.8"/>`);
+    if (p.heat && p.heat.stops) {
+      const bx = L + pw + fs * 0.9, bw = fs * 0.8, gid = `${id}-g${n}`, st = p.heat.stops;
+      o.push(`<linearGradient id="${gid}" x1="0" y1="1" x2="0" y2="0">${st.map((c, i) => `<stop offset="${(i / (st.length - 1)).toFixed(3)}" stop-color="${c}"/>`).join("")}</linearGradient>`);
+      o.push(`<rect x="${bx.toFixed(1)}" y="${top.toFixed(2)}" width="${bw.toFixed(1)}" height="${ph.toFixed(2)}" fill="url(#${gid})" stroke="${ink}" stroke-width="0.6"/>`);
+      o.push(`<g fill="${ink}" font-size="${(fs * 0.85).toFixed(1)}"><text x="${(bx + bw + fs * 0.3).toFixed(1)}" y="${(top + fs * 0.7).toFixed(1)}">${lab(p.heat.hi)}</text><text x="${(bx + bw + fs * 0.3).toFixed(1)}" y="${(top + ph).toFixed(1)}">${lab(p.heat.lo)}</text></g>`);
+    }
     const named = p.series.filter(s => s.label);
     if (named.length > 1 || (named.length === 1 && p.series.length > 1)) o.push(legend(named, pts, { L, top, pw, ph, fs, ink }));
   });
