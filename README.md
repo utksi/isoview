@@ -22,6 +22,24 @@ formats, including real VASP, Quantum ESPRESSO and CASTEP outputs from public te
 Drop several files at once to combine them, e.g. a `WAVECAR` with its `CONTCAR`. You can also paste a structure
 as text, or link to a file with `?url=https://...` (the host must allow cross-origin requests).
 
+## In your website, notebooks and editor
+
+- **Website**: "Embed in your website" (top right of the opening page) gives an `<iframe>` that shows a file from any
+  address that allows cross-origin requests (GitHub Pages and raw.githubusercontent.com do):
+  `https://utkarsh.science/isoview/?embed&url=https://.../CHGCAR`. Options: `&theme=light|dark`, `&style=stick`,
+  `&look=soft`, `&panel=1` (start with the panel open). In embedded mode nothing is kept in the visitor's browser and
+  the wordmark opens the full site.
+- **Jupyter** ([`python/`](python/)): `pip install "isoview-notebook @ git+https://github.com/utksi/isoview#subdirectory=python"`,
+  then `isoview.show("CHGCAR")`, `isoview.show("WAVECAR", "CONTCAR")` or `isoview.show(atoms)` (ASE Atoms, a list of
+  them as a trajectory, or a pymatgen Structure). JupyterLab, Notebook, VS Code and Colab.
+- **Julia** ([`julia/`](julia/)): `Pkg.add(url="https://github.com/utksi/isoview", subdir="julia")`, then
+  `using Isoview; isoview("CHGCAR")`. Pluto, IJulia and VS Code.
+- **VS Code** ([`vscode/`](vscode/)): "Open in isoview" on a file in the Explorer, also over Remote SSH (not yet on
+  the Marketplace).
+
+The notebook packages and the extension load the viewer from this site in the notebook's or editor's own window and
+hand it the files there, so nothing is uploaded; that window needs internet access.
+
 ## Using it
 
 - **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
@@ -39,6 +57,12 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   density also the number of electrons there; a short note under it says how to read the level for that kind of
   field (density, signed field, potential, ELF).
   Signed fields show a positive and a negative surface.
+- **Slice** (Surface panel): a 2D cut through the field on any lattice plane (hkl), at a position set with a slider.
+  It shows in the scene as a coloured plane and in its own window (drag it by its top; it can be made larger) with
+  contour lines, the atoms within 0.8 Å of the plane and a colour bar: densities on a log scale over three decades,
+  signed fields (orbitals, magnetization) blue to red about zero, potentials and ELF linear (each can be changed).
+  The slice is sampled at four pixels per grid step with tricubic interpolation of the (already Fourier-refined)
+  grid, and saves as PNG (2000 px) or SVG (image, vector contour lines and atoms).
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
   **Add a band as a layer** (or Ctrl/⌘-click a band) shows several bands at once, for example a hole in spin ↓
@@ -79,6 +103,16 @@ as text, or link to a file with `?url=https://...` (the host must allow cross-or
   **Movies**: GIF or video (MP4 or WebM, whichever the browser records) at a chosen speed, frame range and size. GIFs
   share one palette over the whole movie (no flicker) and store only what changed between frames, so they stay small.
   Videos are recorded in real time. **All frames as XYZ** saves the trajectory with the shift and deletions applied.
+  **Analysis** (Trajectory panel) opens a chart window: the radial distribution function g(r), total and for each
+  pair of elements, with the first peak and the coordination number to the first minimum; the mean squared
+  displacement of each element with the diffusion coefficient from its slope; the vibrational density of states
+  from the velocity autocorrelation; and per-frame energy, temperature estimate, volume, density and cell lengths.
+  Time-dependent results need the time between saved frames (Time step, in fs), which most trajectory files do not
+  store. Charts save as CSV or SVG; deleted atoms are left out.
+- **Brillouin zone** (Structure panel, or `K`): the view switches from the crystal to its first Brillouin zone,
+  with b₁ b₂ b₃, the high-symmetry points and the standard k-path of Setyawan and Curtarolo (2010), as used by
+  pymatgen and most band-structure plots; the line under the view names the lattice and the path. The zone follows
+  the lattice of the structure (at the cell tolerance), and switching back restores the crystal and its view.
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
   and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
@@ -111,6 +145,16 @@ blended. Parsing, WAVECAR transforms and meshing all run off the main thread.
   ENCUT and checked against the stored count). They are the smooth part of the PAW orbitals, normalised to one
   electron; the augmentation inside the PAW spheres is not included.
 - Bonds join atoms closer than reach × (R₁ + R₂), with covalent radii from Cordero et al. (2008).
+- Slices: plane normal along h b₁ + k b₂ + l b₃ (reciprocal vectors); tricubic Catmull-Rom interpolation of the grid;
+  contour lines by marching squares.
+- Brillouin zone: the Wigner-Seitz cell of the reciprocal lattice; the Bravais lattice and its points are found from
+  the lattice alone (via the primitive and conventional cells), checked against pymatgen for every lattice type and
+  variant.
+- Trajectory analysis: g(r) over all periodic images (each frame normalised by its own volume); MSD averaged over
+  all time origins (by FFT) on positions unwrapped with image flags, centre-of-mass drift removed, D = slope / 6
+  fitted over 20-80 % of the lags; velocities by central differences; VDOS as the Hann-windowed cosine transform of
+  the mass-weighted velocity autocorrelation; temperature T = 2 KE / ((3N - 3) k_B). Masses: IUPAC 2016 standard
+  atomic weights.
 - The space group next to the file name comes from [moyo](https://github.com/spglib/moyo) (by the spglib
   developers; its WebAssembly build is in `js/vendor/moyo`, MIT or Apache-2.0), at the same tolerance as the cell tools
   (1e-5 Å by default). For a trajectory it is that of the frame shown; molecules without a cell get none.
@@ -122,7 +166,8 @@ Before deploying a change, run `node tools/version.mjs N` with a new N: it puts 
 every module import and the worker, so browsers never mix cached old modules with new ones (a module worker does not
 use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
-symmetry, camera and measurement maths run in Node: `node tests/run.mjs`. The marching-cubes case
+symmetry, camera and measurement maths run in Node: `node tests/run.mjs`; slices, the Brillouin zone and trajectory
+analysis have their own (`node tests/slice.mjs`, `tests/bz.mjs`, `tests/analysis.mjs`). The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause, licence text in
 `js/gfx/LICENSE-3Dmol.txt`).
 

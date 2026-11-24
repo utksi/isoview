@@ -8,7 +8,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=27">
+<link rel="stylesheet" href="css/style.css?v=28">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -69,6 +69,7 @@
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
       <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output><label class="keep" title="Keep this bond reach when you open another file (otherwise it returns to 1.15)"><input type="checkbox" id="tol-keep">keep</label></div></div>
       <div class="row has-cell"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
+      <div class="row pbc"><label class="lab" for="bz">Brillouin zone</label><input type="checkbox" class="sw" id="bz" title="Show the Brillouin zone with its high-symmetry points and k-path instead of the crystal (K)"></div>
       <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
       <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
     </div>
@@ -84,6 +85,7 @@
       <div class="row col"><div class="lv"><label class="lab" for="iso">Level</label><input id="iso-num" class="num-in" inputmode="decimal" aria-label="isovalue" spellcheck="false"></div><input type="range" id="iso" min="0" max="1000" step="1"><div class="hint" id="iso-hint"></div><p class="note iso-note" id="iso-note"></p></div>
       <div class="row" id="row-pm"><label class="lab" for="pm">Negative lobe</label><input type="checkbox" class="sw" id="pm" checked></div>
       <div class="row"><label class="lab" for="opacity">Opacity</label><input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.85"></div>
+      <div class="row"><label class="lab" for="slice">Slice</label><input type="checkbox" class="sw" id="slice" title="A 2D cut through the field, in the scene and in its own window"></div>
       <div class="row"><span class="lab">Resolution</span><div class="seg" data-key="res"><button type="button" value="auto">Auto</button><button type="button" value="1">Full</button><button type="button" value="2">½</button><button type="button" value="4">¼</button></div></div>
       <div class="stats" id="stats"></div>
     </div>
@@ -110,6 +112,9 @@
       <div class="row"><label class="lab" for="tr-step">Step</label><div class="reps"><span>every</span><input type="number" id="tr-step" min="1" value="1" aria-label="show every n-th frame"><span id="tr-step-u">frame</span></div></div>
       <div class="row"><span class="lab">At the end</span><div class="seg" data-key="loop"><button type="button" value="loop">Loop</button><button type="button" value="bounce">Bounce</button><button type="button" value="once">Stop</button></div></div>
       <div class="spark" id="tr-spark" hidden><svg id="tr-svg" aria-label="Energy of each frame; click to go to a frame"></svg><div class="spark-r"><span id="tr-e-range"></span><span id="tr-e-now"></span></div></div>
+      <div class="sub-h">Analysis</div>
+      <div class="row"><label class="lab" for="an-dt">Time step</label><div class="reps"><input type="number" id="an-dt" min="0" step="any" placeholder="?" aria-label="time between saved frames, fs"><span>fs per frame</span></div></div>
+      <div class="tool-row pad" id="an-open"><button type="button" data-an="rdf" title="Radial distribution function g(r), total and per element pair, with coordination numbers">RDF</button><button type="button" data-an="msd" title="Mean squared displacement per element and the diffusion coefficient">MSD</button><button type="button" data-an="vacf" title="Vibrational density of states from the velocity autocorrelation (needs the time step)">VDOS</button><button type="button" data-an="frames" title="Energy, temperature estimate, volume, density and cell lengths per frame">Per frame</button></div>
       <div class="sub-h">Movie</div>
       <div class="row"><span class="lab">Format</span><div class="seg" data-key="mfmt"><button type="button" value="gif">GIF</button><button type="button" value="video" id="mfmt-video">Video</button></div></div>
       <div class="row"><label class="lab" for="mv-fps">Movie speed</label><div class="reps"><input type="number" id="mv-fps" min="1" max="60" value="12" aria-label="movie frames per second"><span>fps</span></div></div>
@@ -127,7 +132,7 @@
       <div class="row"><span class="lab">Theme</span><div class="seg" data-key="theme"><button type="button" value="auto">Auto</button><button type="button" value="light">Light</button><button type="button" value="dark">Dark</button></div></div>
       <div class="row"><span class="lab">Renderer</span><span class="num-plain" id="gfx">–</span></div>
       <p class="keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>F</kbd> search options</p>
-      <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>L</kbd> labels <kbd>S</kbd> save image <kbd>H</kbd> hide panels</p>
+      <p class="keys"><kbd>O</kbd> open <kbd>R</kbd> reset <kbd>A</kbd><kbd>B</kbd><kbd>C</kbd> view along <kbd>L</kbd> labels <kbd>K</kbd> Brillouin zone <kbd>S</kbd> save image <kbd>H</kbd> hide panels</p>
       <p class="keys">Click atoms to measure: two give a distance, three an angle, four a dihedral. Click empty space to clear.</p>
       <p class="keys"><kbd>Shift</kbd> + drag: draw a region to select atoms (and to cut the surface).</p>
       <p class="keys"><kbd>Space</kbd> plays a trajectory · <kbd>←</kbd><kbd>→</kbd> step through frames (<kbd>Shift</kbd>: ×10).</p>
@@ -157,10 +162,51 @@
   <input type="range" id="pl-frame" min="0" max="0" step="1" value="0" aria-label="Frame">
   <span class="pl-n" id="pl-count">1 / 1</span>
 </div>
+<div class="slicewin glass" id="slicewin" role="dialog" aria-label="Slice" hidden>
+  <div class="sl-head" id="sl-head">
+    <div class="seg2" id="sl-planes" role="group" aria-label="Plane"><button type="button" value="1 0 0">(100)</button><button type="button" value="0 1 0">(010)</button><button type="button" value="0 0 1">(001)</button></div>
+    <input id="sl-hkl" class="sl-hkl" value="0 0 1" spellcheck="false" aria-label="Miller indices h k l" title="Any plane: Miller indices h k l">
+    <span class="sl-sp"></span>
+    <button type="button" class="sl-ic" id="sl-big" title="Larger" aria-label="Larger" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 13.5 10.5M4.5 19.5l6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button type="button" class="sl-ic" id="sl-x" title="Close the slice" aria-label="Close the slice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+  </div>
+  <div class="sl-pos"><input type="range" id="sl-t" min="0" max="1" step="0.0005" value="0.5" aria-label="Position of the plane"><span class="sl-d" id="sl-d"></span></div>
+  <div class="sl-fig"><canvas id="sl-cv" aria-label="The slice"></canvas><div class="sl-bar"><span id="sl-max"></span><canvas id="sl-cb" width="12" height="256" aria-hidden="true"></canvas><span id="sl-min"></span></div></div>
+  <div class="sl-opts">
+    <div class="seg2" id="sl-scale" role="group" aria-label="Scale"><button type="button" value="lin">lin</button><button type="button" value="log">log</button></div>
+    <select id="sl-map" aria-label="Colours"><option value="auto">auto</option><option value="viridis">viridis</option><option value="rdbu">RdBu</option><option value="grey">grey</option></select>
+    <label class="sl-ck"><input type="checkbox" id="sl-iso" checked>lines</label>
+    <label class="sl-ck"><input type="checkbox" id="sl-atoms" checked>atoms</label>
+    <label class="sl-ck"><input type="checkbox" id="sl-3d" checked>in 3D</label>
+    <span class="sl-sp"></span>
+    <button type="button" class="sl-save" id="sl-png" title="Save the slice as a PNG image">PNG</button><button type="button" class="sl-save" id="sl-svg" title="Save the slice as SVG (image, lines and atoms; for papers)">SVG</button>
+  </div>
+</div>
+<div class="anwin glass" id="anwin" role="dialog" aria-label="Trajectory analysis" hidden>
+  <div class="sl-head" id="an-head">
+    <div class="seg2" id="an-tabs" role="group" aria-label="Analysis"><button type="button" value="rdf">RDF</button><button type="button" value="msd">MSD</button><button type="button" value="vacf">VDOS</button><button type="button" value="frames">Per frame</button></div>
+    <span class="sl-sp"></span>
+    <button type="button" class="sl-ic" id="an-big" title="Larger" aria-label="Larger" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 13.5 10.5M4.5 19.5l6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button type="button" class="sl-ic" id="an-x" title="Close" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+  </div>
+  <div class="an-plot" id="an-plot"></div>
+  <p class="an-res" id="an-res"></p>
+  <div class="sl-opts"><span id="an-opts" class="an-opts"></span><span class="sl-sp"></span><button type="button" class="sl-save" id="an-csv" title="The plotted data as CSV">CSV</button><button type="button" class="sl-save" id="an-svg" title="The chart as SVG">SVG</button></div>
+</div>
 <div class="pill glass" id="measure" hidden></div>
 <div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-all" title="Label every atom drawn">Label all</button><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong" title="Leave label mode (L); the labels stay">Done</button></div>
 
 <section id="empty">
+  <nav class="use" aria-label="Use isoview elsewhere">
+    <button type="button" class="use-web" data-use="web" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 7.5-5 4.5 5 4.5M15.5 7.5l5 4.5-5 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Embed in your website</button>
+    <span class="use-in">Use in</span>
+    <button type="button" class="use-ic" data-use="jupyter" aria-haspopup="dialog" title="Use in Jupyter" aria-label="Use in Jupyter"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#f37726" d="M4.3 9.6C5.8 6.4 8.7 4.6 12 4.6s6.2 1.8 7.7 5C17.7 7.9 15 7 12 7s-5.7.9-7.7 2.6zm0 4.8c1.5 3.2 4.4 5 7.7 5s6.2-1.8 7.7-5C17.7 16.1 15 17 12 17s-5.7-.9-7.7-2.6z"/><circle cx="18.6" cy="3.9" r="1.1" fill="#9e9e9e"/><circle cx="5.3" cy="20" r="1.3" fill="#616262"/><circle cx="4.9" cy="4.7" r="0.8" fill="#767677"/></svg></button>
+    <button type="button" class="use-ic" data-use="julia" aria-haspopup="dialog" title="Use in Julia" aria-label="Use in Julia"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6.9" r="4.3" fill="#389826"/><circle cx="6.8" cy="16" r="4.3" fill="#cb3c33"/><circle cx="17.2" cy="16" r="4.3" fill="#9558b2"/></svg></button>
+  </nav>
+  <div class="use-pop glass" id="use-pop" role="dialog" aria-labelledby="use-h" hidden>
+    <div class="use-head"><h2 id="use-h"></h2><button type="button" class="use-x" id="use-x" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></div>
+    <div id="use-body"></div>
+  </div>
   <div class="hero">
     <svg class="glyph big" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="16" cy="16" rx="13" ry="9" transform="rotate(-24 16 16)"/><ellipse cx="16.8" cy="15.4" rx="7.6" ry="4.8" transform="rotate(-24 16 16)"/></g><circle cx="17.4" cy="15" r="1.8" fill="currentColor"/></svg>
     <h1>isoview</h1>
@@ -185,6 +231,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=27"></script>
+<script type="module" src="js/app.js?v=28"></script>
 </body>
 </html>

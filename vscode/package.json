@@ -1,0 +1,24 @@
+{
+  "name": "isoview",
+  "displayName": "isoview",
+  "description": "Crystal structures, volumetric data (CHGCAR, LOCPOT, cube), WAVECAR orbitals and trajectories in 3D, inside VS Code",
+  "version": "0.1.0",
+  "publisher": "utksi",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "https://github.com/utksi/isoview" },
+  "homepage": "https://utkarsh.science/isoview/",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Visualization", "Data Science", "Other"],
+  "keywords": ["crystal", "VASP", "CHGCAR", "WAVECAR", "POSCAR", "CIF", "isosurface", "trajectory", "materials"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      { "command": "isoview.open", "title": "Open in isoview", "category": "isoview" }
+    ],
+    "menus": {
+      "explorer/context": [{ "command": "isoview.open", "when": "!explorerResourceIsFolder", "group": "navigation@90" }],
+      "editor/title/context": [{ "command": "isoview.open", "group": "navigation@90" }]
+    }
+  }
+}

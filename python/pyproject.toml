@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isoview-notebook"
+version = "0.1.0"
+description = "Show crystal structures, volumetric data, orbitals and trajectories with isoview in Jupyter notebooks"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Utkarsh Singh" }]
+requires-python = ">=3.8"
+dependencies = []
+keywords = ["crystal structure", "CHGCAR", "WAVECAR", "isosurface", "VASP", "visualization", "jupyter"]
+classifiers = [
+  "Framework :: Jupyter",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.urls]
+Homepage = "https://utkarsh.science/isoview/"
+Source = "https://github.com/utksi/isoview"
+
+[tool.setuptools]
+packages = ["isoview"]
