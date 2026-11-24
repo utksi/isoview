@@ -5,7 +5,9 @@
  * NEB images, animations). Every reader returns a dataset shaped like those of formats.js,
  *   { title, structure, fields: [], notes, traj }
  * with structure = frame 0 and, when there are two or more frames,
- *   traj = { n, nat, pos: Float64Array(3 nat n), cells: Float64Array(9 n) | null, energy: Float64Array(n) | null }
+ *   traj = { n, nat, pos: Float64Array(3 nat n), cells: Float64Array(9 n) | null, energy: Float64Array(n) | null,
+ *            dt_fs: time between frames in fs, when the file says it (VASP molecular dynamics, IBRION = 0: POTIM in
+ *            OUTCAR and vasprun.xml, which keep every ionic step; pw.x md runs: "Time step = ... femto-seconds") }
  * pos: Cartesian coordinates (Angstrom), atom i of frame f at index 3 (nat f + i). cells: lattice rows a, b, c of
  * every frame (Angstrom, 9 numbers per frame) when the cell changes (NPT, variable-cell relaxation), else null and
  * structure.lattice holds for all frames. energy: eV per frame as the code prints it (VASP free energy TOTEN,
@@ -16,9 +18,9 @@
  * or alat and Ry; CASTEP .md/.geom in Bohr and Hartree; GROMACS .gro in nm. Conversions: BOHR = 0.529177210903 A,
  * Ry = 13.605693122994 eV, Ha = 2 Ry, nm = 10 A.
  */
-import { Cursor, tokens } from "./numbers.js?v=29";
-import { elementOf, SYMBOLS } from "./elements.js?v=29";
-import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=29";
+import { Cursor, tokens } from "./numbers.js?v=30";
+import { elementOf, SYMBOLS } from "./elements.js?v=30";
+import { BOHR, det3, fracToCart, fromParams } from "./lattice.js?v=30";
 
 const RY = 13.605693122994; // eV
 const HA = 2 * RY; // eV
@@ -30,7 +32,7 @@ const HA = 2 * RY; // eV
  * null] per frame; energies: [eV or NaN] per frame. The cell counts as changing if any entry differs from frame 0 by
  * more than 1e-6 A.
  */
-export function finish(species, frames, cells, energies, { title = "", pbc = true, notes = [] } = {}) {
+export function finish(species, frames, cells, energies, { title = "", pbc = true, notes = [], dt_fs = null } = {}) {
   const n = frames.length, nat = species.length;
   if (!n) throw new Error("no structures found");
   const c0 = cells[0] || cells.find(Boolean) || null;
@@ -42,7 +44,7 @@ export function finish(species, frames, cells, energies, { title = "", pbc = tru
   let C = null;
   if (varies) { C = new Float64Array(9 * n); cells.forEach((c, f) => C.set((c || c0).flat(), 9 * f)); }
   const E = energies.some(Number.isFinite) ? Float64Array.from({ length: n }, (_, f) => (Number.isFinite(energies[f]) ? energies[f] : NaN)) : null;
-  return { title, structure, fields: [], notes, traj: { n, nat, pos, cells: C, energy: E } };
+  return { title, structure, fields: [], notes, traj: { n, nat, pos, cells: C, energy: E, ...(dt_fs > 0 ? { dt_fs } : {}) } };
 }
 
 /** Cartesian coordinates (Float64Array 3N) from fractional ones f (3N) and lattice rows L. */
@@ -162,7 +164,9 @@ export function parseOUTCAR(text) {
     }
     re.lastIndex = cur.pos;
   }
-  return finish(species, frames, cells, energies, { title: "OUTCAR", notes });
+  // molecular dynamics (IBRION = 0): one ionic step of POTIM fs between frames
+  const ib = text.match(/^\s*IBRION\s*=\s*(-?\d+)/m), pt = text.match(/^\s*POTIM\s*=\s*([-\d.Ee+]+)/m);
+  return finish(species, frames, cells, energies, { title: "OUTCAR", notes, dt_fs: ib && +ib[1] === 0 && pt ? +pt[1] : null });
 }
 
 /* ------------------------------------------------------------------ VASP vasprun.xml */
@@ -208,7 +212,8 @@ export function parseVasprun(text) {
     if (s0 < 0 || !add(text, s0)) throw new Error("vasprun.xml: no structures");
     energies.push(NaN);
   }
-  return finish(species, frames, cells, energies, { title: "vasprun.xml", notes });
+  const ib = text.match(/<i[^>]*name="IBRION"[^>]*>\s*(-?\d+)\s*</), pt = text.match(/<i[^>]*name="POTIM"[^>]*>\s*([-\d.Ee+]+)\s*</);
+  return finish(species, frames, cells, energies, { title: "vasprun.xml", notes, dt_fs: ib && +ib[1] === 0 && pt ? +pt[1] : null });
 }
 
 /* ------------------------------------------------------------------ extended XYZ (one or many frames) */
@@ -387,7 +392,8 @@ export function parseQEout(text) {
   }
   const energies = [...text.matchAll(/^!\s+total energy\s*=\s*([-\d.Ee+]+)\s*Ry/gm)].map(r => +r[1] * RY).slice(0, frames.length);
   if (frames.length > 1 && energies.length < frames.length - 1) notes.push("some steps have no converged energy");
-  return finish(species, frames, cells, energies, { title: "pw.x output", notes });
+  const ts = /Molecular Dynamics Calculation/.test(text) && text.match(/Time step\s*=\s*[-\d.Ee+]+\s*a\.u\.,\s*([-\d.Ee+]+)\s*femto-seconds/);
+  return finish(species, frames, cells, energies, { title: "pw.x output", notes, dt_fs: ts ? +ts[1] : null });
 }
 
 /* ------------------------------------------------------------------ PDB (one or many MODELs) */

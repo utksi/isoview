@@ -46,8 +46,9 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
 - **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
   or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
-  **Show elements** has a chip for each element, with its atom count: click the element to pick its colour (the
-  scene follows as you move through the colour picker; ↺ returns to the default), untick it to hide those atoms and their
+  **Show elements** has a chip for each element, with its atom count: click the element to pick its colour in a
+  small picker on the page (a saturation-brightness square, a hue slider, swatches, a hex field and Default; the
+  scene follows as you move), untick it to hide those atoms and their
   bonds: the bonds are still found among all atoms, so hiding Cl does not bond the cations it kept apart. Hiding
   only changes the view; Export as shown leaves hidden elements out and says so. Opening a new file shows every
   element again.
@@ -109,10 +110,22 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   pair of elements, with the first peak and the coordination number to the first minimum; the mean squared
   displacement of each element with the diffusion coefficient from its slope; the vibrational density of states
   from the velocity autocorrelation; and per-frame energy, temperature estimate, volume, density and cell lengths.
-  Time-dependent results need the time between saved frames (Time step, in fs), which most trajectory files do not
-  store. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
+  Time-dependent results need the time between saved frames (Time step, in fs). It is filled in from VASP
+  molecular dynamics (IBRION = 0: POTIM, in vasprun.xml and OUTCAR) and pw.x md output; other files do not store it,
+  and the value typed is kept with the trajectory. Without one, the VDOS is drawn for 1 fs per frame and says so (its
+  frequencies scale as 1 / time step); MSD stays in frames. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
   quantities, drawn as panels over one time axis. Figures save as SVG or 600 dpi PNG, 3.5 in wide (one journal
-  column), with only the curves shown, and the same curves as CSV; deleted atoms are left out.
+  column), with only the curves shown, and the same curves as CSV; deleted atoms are left out. The window belongs to
+  the scene: opening other files closes it.
+- **X-ray diffraction** (Structure panel, XRD pattern; for a trajectory also a tab of Analysis): the powder pattern
+  as pymatgen's XRDCalculator computes it (the same peaks, intensities and hkl to 1e-6; atomic form factors with
+  the Mott-Bethe relation, Lorentz-polarisation factor, no thermal factor). Cu, Mo, Co, Fe, Cr or Ag Kα or any
+  wavelength, a 2θ range and a peak width. The chart has the broadened profile, the peaks as sticks and the hkl of
+  the strongest peaks (each can be switched off), named in the conventional cell (four indices for hexagonal cells),
+  so a primitive fcc cell shows 111, 220, 311; the result lists the strongest peaks with d and multiplicities, and
+  the CSV has the profile and every peak. For a trajectory: **Frame** (the pattern of the frame shown, following the
+  player), **Average** (over up to 200 frames, each with its own cell) or **Map** (2θ against time on one intensity
+  scale, logarithmic or linear colours, a dashed line at the frame shown).
 - **Brillouin zone** (Structure panel, or `K`): the view switches from the crystal to its first Brillouin zone,
   with b₁ b₂ b₃, the high-symmetry points and the standard k-path of Setyawan and Curtarolo (2010), as used by
   pymatgen and most band-structure plots; the line under the view names the lattice and the path. The zone follows
@@ -121,6 +134,7 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   drag in it to turn both, scroll to zoom it, drag its corner to resize it; Crystal inset (Structure panel) hides it.
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
   and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
+  A first visit starts in Glossy; after that the look last chosen stays, also for new scenes and later visits.
 - **Labels**: switch on label mode (tag button or `L`) and click atoms to put their symbol on them; click again to remove.
   The bar that appears also has **Label all** (every atom drawn) and Clear.
   Labels stay when you leave the mode and are hidden by atoms in front of them, like the rest of the scene.
@@ -128,10 +142,11 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   vector, `L` labels, `S` photo mode, `H` hide the panels, `Del` delete, `Esc` clear. Right-drag pans. The isoview
   wordmark returns to the opening page.
 - **Colour single atoms**: select atoms and choose **Colour** in the bar that appears; every periodic image of them
-  takes the colour, it stays through supercells, deletions and reloads, and **Element colour** undoes it.
-- **Photo** (top left, or `S`): hides every control and draws the view supersampled, so edges are smooth. Turn and
+  takes the colour, it stays through supercells, deletions and reloads, and the picker's Default undoes it. Surface
+  colours (Layers panel) use the same picker; no colour opens the system's colour dialog.
+- **Photo Mode** (top left, or `S`): hides every control and draws the view supersampled, so edges are smooth. Turn and
   zoom to frame it, then **Save PNG** or **Copy** at the screen's size, 2× or 4× the window (up to 16 Mpx), on the
-  theme's background, white, or none (transparent). Large images are drawn in tiles at twice the output size and
+  theme's background, white, or transparent. Large images are drawn in tiles at twice the output size and
   averaged down; a transparent background comes from one render on black and one on white. In the Brillouin-zone
   view the crystal inset is part of the photo. `Esc` or Done returns.
 - **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
@@ -180,7 +195,7 @@ every module import and the worker, so browsers never mix cached old modules wit
 use import maps, so the version has to be in the import specifiers themselves).
 Tests of the readers (including every trajectory format, against ASE on the files in `tests/fixtures`), meshing,
 symmetry, camera and measurement maths run in Node: `node tests/run.mjs`; slices, the Brillouin zone and trajectory
-analysis have their own (`node tests/slice.mjs`, `tests/bz.mjs`, `tests/analysis.mjs`, `tests/plot.mjs`, `tests/tiles.mjs`). The marching-cubes case
+analysis have their own (`node tests/slice.mjs`, `tests/bz.mjs`, `tests/analysis.mjs`, `tests/plot.mjs`, `tests/tiles.mjs`, `tests/xrd.mjs`). The marching-cubes case
 table is the classic Lorensen-Cline one, taken from [3Dmol.js](https://3dmol.org) (BSD-3-Clause, licence text in
 `js/gfx/LICENSE-3Dmol.txt`).
 

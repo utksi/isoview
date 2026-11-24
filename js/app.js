@@ -38,24 +38,31 @@
  * the crystal view (camera included) comes back when it is switched off. A crystal inset (BZI) draws the structure
  * with a second renderer and the main camera's rotation.
  * Colours: element colours (S.colors, element chips) and single-atom colours (S.atomColors, by item and atom id) over
- * the defaults of elements.js; recolor() repaints without rebuilding, so a colour picker updates the scene live.
+ * the defaults of elements.js, chosen in the in-page picker (picker.js); recolor() repaints without rebuilding, so the
+ * scene follows the picker live.
+ * X-ray diffraction (AN.kind "xrd", xrd.js in the worker): the active crystal's pattern, or for a trajectory the frame
+ * shown, the average over frames, or a 2theta x time map.
+ * Look: Glossy on a first visit, then the last choice (localStorage isoview-look).
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=29";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=29";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=29";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=29";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=29";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=29";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=29";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=29";
-import { measureAll } from "./measure.js?v=29";
-import { GifWriter, buildPalette } from "./gif.js?v=29";
-import * as store from "./store.js?v=29";
-import { contours, scaler, paint, lut } from "./slice.js?v=29";
-import { chart, toCSV } from "./plot.js?v=29";
-import { wignerSeitz, kpath } from "./bz.js?v=29";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=30";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=30";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=30";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=30";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=30";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=30";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=30";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=30";
+import { measureAll } from "./measure.js?v=30";
+import { GifWriter, buildPalette } from "./gif.js?v=30";
+import * as store from "./store.js?v=30";
+import { contours, scaler, paint, lut } from "./slice.js?v=30";
+import { chart, toCSV } from "./plot.js?v=30";
+import { openPicker } from "./picker.js?v=30";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=30";
+import { colormap } from "./slice.js?v=30";
+import { wignerSeitz, kpath } from "./bz.js?v=30";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -74,7 +81,7 @@ const S = {
   items: new Map(), layers: [], active: null, activeAtoms: null, t: [0, 0, 0],
   style: "ball", scale: 1, bonds: true, tol: 1.15, cell: true, reps: [1, 1, 1], boundary: true, res: "auto",
   proj: "persp", theme: "auto", sel: [], region: null, labels: [], labelMode: false, boxMode: false, undo: [], atlas: null,
-  frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "classic",
+  frame: 0, playing: false, fps: 12, step: 1, loop: "loop", movie: { fmt: "gif", scale: 0.5 }, exporting: null, look: "glossy",
   hide: new Set(), // elements not drawn (Structure panel checkboxes); a view setting, the structure keeps them
   colors: new Map(), // element -> "#rrggbb" chosen by the user (element chips)
   atomColors: new Map(), // atomKey (item id : atom id) -> "#rrggbb" for single atoms (selection bar: Colour)
@@ -82,6 +89,9 @@ const S = {
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
 const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
+// the look of a first visit; afterwards the last one chosen (localStorage isoview-look, also for new scenes)
+const LOOK0 = "glossy";
+try { const v = localStorage.getItem("isoview-look"); if (LOOKS[v]) S.look = v; } catch (e) { /* storage unavailable */ }
 let nextItem = 1, nextLayer = 1;
 const cam = new Camera();
 let R = null, canvas = $("gl"), pal = {}, disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
@@ -135,7 +145,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=29", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=30", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -283,7 +293,7 @@ function buildStructure() {
 /** New colours without rebuilding the scene (live while a colour picker is open): atoms, bonds, labels, the element
  *  swatches, the slice window; in the Brillouin-zone view, the crystal inset. */
 function recolor() {
-  for (const b of document.querySelectorAll("#species .sp-col")) if (document.activeElement !== b) b.value = elColor(b.dataset.el);
+  for (const b of document.querySelectorAll("#species .sp-c")) b.querySelector(".dot").style.background = elColor(b.dataset.el);
   if (!R) return;
   if (S.bz) { buildInset(); requestRender(); return; }
   for (const a of disp.atoms) { const L = layerById(a.layer); if (L) a.color = atomColor(L, a); }
@@ -293,22 +303,20 @@ function recolor() {
   if (SL.on) drawSliceWindow();
   requestRender(); saveSoon();
 }
-/** One chip per element of the atoms layers on show: a checkbox (unticked = not drawn), the element as a colour
- *  swatch (a click opens the colour picker; the scene follows live) with its atom count, and a reset when the colour
- *  is not the default. */
+/** One chip per element of the atoms layers on show: a checkbox (unticked = not drawn) and the element with its colour
+ *  and atom count (a click opens the in-page colour picker, picker.js; the scene follows live). */
 function speciesUI() {
   const count = new Map();
   for (const L of atomLayers()) for (const el of itemOf(L).structure.species) count.set(el, (count.get(el) || 0) + 1);
   const els = [...count.keys()].sort((a, b) => SYMBOLS.indexOf(a) - SYMBOLS.indexOf(b)), box = $("species");
   $("row-species").hidden = els.length === 0;
-  const key = els.map(e => `${e}${count.get(e)}${S.hide.has(e) ? "-" : ""}${S.colors.has(e) ? "*" : ""}`).join();
+  const key = els.map(e => `${e}${count.get(e)}${S.hide.has(e) ? "-" : ""}`).join();
   if (box.dataset.key === key) return;
   box.dataset.key = key;
   box.innerHTML = els.map(e => {
     const x = esc(e);
     return `<span class="sp"><input type="checkbox" data-el="${x}"${S.hide.has(e) ? "" : " checked"} title="${S.hide.has(e) ? "Show" : "Hide"} the ${x} atoms" aria-label="Show ${x}">` +
-      `<label class="sp-c" title="Colour of the ${x} atoms"><input type="color" class="sp-col" data-el="${x}" value="${elColor(e)}" aria-label="Colour of ${x}">${x}<em>${count.get(e)}</em></label>` +
-      (S.colors.has(e) ? `<button type="button" class="sp-rs" data-el="${x}" title="Back to the default ${x} colour" aria-label="Default colour for ${x}">↺</button>` : "") + `</span>`;
+      `<button type="button" class="sp-c" data-el="${x}" title="Colour of the ${x} atoms" aria-haspopup="dialog"><span class="dot" style="background:${elColor(e)}"></span>${x}<em>${count.get(e)}</em></button></span>`;
   }).join("");
 }
 function uploadAtoms() {
@@ -474,8 +482,7 @@ function updateSelectionBar() {
   const act = [];
   if (S.sel.length === 1) act.push(`<button type="button" data-act="center" title="${primaryCell() ? "Put this atom at the centre of the cell" : "Turn the view about this atom"}">Center</button>`);
   if (S.sel.length) {
-    act.push(`<button type="button" data-act="color" title="Colour the selected atoms (in every periodic image)">Colour</button>`);
-    if (S.sel.some(s => S.atomColors.has(atomKey(layerById(s.layer), s.src)))) act.push(`<button type="button" data-act="uncolor" title="Give the selected atoms their element's colour again">Element colour</button>`);
+    act.push(`<button type="button" data-act="color" title="Colour the selected atoms (in every periodic image)" aria-haspopup="dialog">Colour</button>`);
   }
   if (S.sel.length) act.push(`<button type="button" data-act="delete" class="warn" title="Delete the selected atoms in every periodic image and frame (Del)">Delete</button>`);
   if (S.region && fieldLayers(true).length) act.push(`<button type="button" data-act="cut" class="warn" title="Remove the surface inside the region">Cut surface</button>`);
@@ -695,6 +702,8 @@ function setFrame(f) {
   S.frame = Math.max(0, Math.min(n - 1, Math.round(f)));
   for (const it of trajItems()) applyFrame(it);
   buildStructure(); updatePlayer();
+  // the XRD window follows the frame shown (Frame: a new pattern; Map: the line at the frame)
+  if (!$("anwin").hidden && AN.kind === "xrd" && AN.res) { if (AN.x.mode === "frame" || !AN.res.r.map) xrdFollow(); else if (AN.res.mode === "map") drawAnalysis(); }
 }
 let playLast = 0, playDir = 1;
 function play(on) {
@@ -1123,7 +1132,7 @@ function buildLayersUI() {
     const it = itemOf(L), f = L.kind === "field" ? it.fields[L.fi] : null;
     const kind = L.kind === "atoms" ? `${it.structure.species.length} atoms${it.traj ? ` · ${it.traj.n} frames` : ""}` : f ? f.name : it.wave ? "orbital" : "field";
     const signed = f && f.kind === "signed";
-    const sw = L.kind === "field" ? `<input type="color" class="cpos" value="${L.pos}" aria-label="Surface colour">${signed ? `<input type="color" class="cneg" value="${L.neg}" aria-label="Negative surface colour">` : ""}` : "";
+    const sw = L.kind === "field" ? `<button type="button" class="cpos" style="--c:${L.pos}" aria-label="Surface colour" title="Surface colour" aria-haspopup="dialog"></button>${signed ? `<button type="button" class="cneg" style="--c:${L.neg}" aria-label="Negative surface colour" title="Negative surface colour" aria-haspopup="dialog"></button>` : ""}` : "";
     const act = L.id === S.active || (L.kind === "atoms" && aa && L.id === aa.id);
     return `<div class="layer${act ? " active" : ""}${L.visible ? "" : " off"}" data-id="${L.id}">` +
       `<button type="button" class="eye" aria-pressed="${L.visible}" aria-label="Show or hide this layer"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/></svg></button>` +
@@ -1152,17 +1161,21 @@ $("layers").addEventListener("click", e => {
     if (L.kind === "field") { requestSurface(L); if (L === activeField()) $("surf").checked = L.visible; }
     buildStructure(); buildLayersUI(); refit();
   } else if (e.target.closest(".rm")) removeLayer(L);
+  else if (e.target.closest(".cpos, .cneg")) { const b = e.target.closest(".cpos, .cneg"); pickSurfaceColor(L, b.classList.contains("cpos") ? "pos" : "neg", b); }
   else if (L.kind === "field" && !e.target.closest("input")) { S.active = L.id; buildLayersUI(); syncFieldUI(); $("sec-surface").open = true; }
   else if (L.kind === "atoms") { S.activeAtoms = L.id; buildLayersUI(); }
 });
-$("layers").addEventListener("input", e => {
-  const row = e.target.closest(".layer"), L = row && layerById(+row.dataset.id);
-  if (!L) return;
-  if (e.target.classList.contains("cpos")) { L.pos = e.target.value; L.auto = false; }
-  if (e.target.classList.contains("cneg")) { L.neg = e.target.value; L.auto = false; }
-  restyleLayer(L);
-  const aw = activeWave(); if (aw) markBand(aw.L);
-});
+/** Surface colour of layer L (which: "pos" or "neg") from the in-page picker at swatch b, live. */
+function pickSurfaceColor(L, which, b) {
+  const auto = pickColors(L);
+  openPicker(b, { value: L[which], def: auto[which === "pos" ? 0 : 1], title: which === "pos" ? "Surface" : "Negative surface",
+    onInput: c => {
+      L[which] = c; L.auto = L.pos === auto[0] && L.neg === auto[1];
+      b.style.setProperty("--c", c); restyleLayer(L);
+      const aw = activeWave(); if (aw) markBand(aw.L);
+      saveSoon();
+    } });
+}
 function removeLayer(L) {
   const index = S.layers.indexOf(L);
   S.layers.splice(index, 1);
@@ -1202,6 +1215,8 @@ function clearScene() {
   for (const it of S.items.values()) if (it.ds) call("drop", { ds: it.ds }).catch(() => {});
   S.items.clear(); S.layers = []; S.active = null; S.activeAtoms = null; S.sel = []; S.region = null; S.labels = []; S.undo = [];
   if (PH.on) setPhoto(false);
+  // the analysis window shows the scene's trajectory: it goes with the scene (a later answer is dropped by seq)
+  $("anwin").hidden = true; AN.res = null; AN.seq++;
   S.srcUrl = null; // web address of the scene's file, when it came from one (?url=, samples)
   S.frame = 0; S.playing = false; S.hide = new Set(); S.colors = new Map(); S.atomColors = new Map();
   S.t = [0, 0, 0]; ["fx", "fy", "fz"].forEach(id => ($(id).value = 0));
@@ -1285,7 +1300,7 @@ function serialize(withFiles = false) {
   const index = new Map(items.map((it, k) => [it.id, k]));
   const state = {
     v: 1, saved: Date.now(),
-    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, hadFiles: !!(it.files && it.files.length),
+    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, hadFiles: !!(it.files && it.files.length), dt: it.dtUser || null,
       structure: it.structure && (!it.kept && !it.example || it.structure.ids) && !(it.traj && it.kept) ? it.structure : null,
       ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
     layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts, auto: !!L.auto, w: L.w } : {}) })),
@@ -1315,7 +1330,7 @@ async function restoreScene(st, files, stored = true) {
   try {
     if (!(await ensureRenderer())) return false;
     clearScene();
-    Object.assign(S, { style: st.view.style, look: LOOKS[st.view.look] ? st.view.look : "classic", scale: st.view.scale, bonds: st.view.bonds, tol: st.view.tol, cell: st.view.cell, reps: st.view.reps.slice(), boundary: st.view.boundary,
+    Object.assign(S, { style: st.view.style, look: LOOKS[st.view.look] ? st.view.look : S.look, scale: st.view.scale, bonds: st.view.bonds, tol: st.view.tol, cell: st.view.cell, reps: st.view.reps.slice(), boundary: st.view.boundary,
       res: st.view.res, proj: st.view.proj, t: st.view.t.slice(), fps: st.view.fps || 12, step: st.view.step || 1, loop: st.view.loop || "loop", hide: new Set(st.view.hide || []), colors: new Map(st.view.colors || []) });
     syncControls();
     for (const sp of st.items) {
@@ -1330,6 +1345,7 @@ async function restoreScene(st, files, stored = true) {
       await addItem({ ...d, name: sp.name, key: sp.key, example: sp.example, alreadyKept: stored && sp.kept }, true, true);
       const it = [...S.items.values()].pop();
       if (sp.structure && !it.traj) it.structure = sp.structure;
+      if (sp.dt > 0) it.dtUser = sp.dt;
       if (it.traj && sp.ids) { const n = sp.ids.length, ids = sp.ids; it.structure = { ...it.structure, species: Array.from(ids, id => it.traj && d.structure.species[id - 1]), ids, pos: new Float64Array(3 * n) }; }
       if (sp.hadFiles && !sp.kept) missing.push(sp.name + " (atoms only: its files were too large to keep)");
       made.push(it);
@@ -1417,9 +1433,16 @@ function updateInfo() {
 }
 function summaries() {
   syncSlice();
-  if (!mainTraj()) $("anwin").hidden = true;
+  if (AN.kind === "xrd") {
+    // XRD: closes without a crystal; recomputed when the structure was replaced (another file, an edit, a new cell)
+    const xi = xrdItem();
+    if (!xi) $("anwin").hidden = true;
+    else if (!$("anwin").hidden && AN.res && AN.res.st !== xi.structure && !(xi.traj && AN.res.it === xi)) runAnalysis();
+  } else if (!mainTraj()) $("anwin").hidden = true;
+  else if (!$("anwin").hidden && AN.res && AN.res.it && AN.res.it !== mainTraj()) runAnalysis();
+  syncDt();
   const pc = primaryCell();
-  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== "classic" ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}${S.hide.size ? ` · no ${[...S.hide].join(", ")}` : ""}`;
+  $("sum-structure").textContent = !atomLayers(false).length ? "" : S.style === "off" ? "hidden" : `${S.style}${S.look !== LOOK0 ? " · " + S.look : ""}${pc && pc.pbc ? " · " + S.reps.join("×") : ""}${S.hide.size ? ` · no ${[...S.hide].join(", ")}` : ""}`;
   const L = activeField(), f = activeStats();
   $("sum-surface").textContent = !L || !f ? "" : !L.visible ? "hidden" : L.mode === "log" ? `${fmt(L.iso)} · ${Math.round(100 * fractionAbove(f.stats, L.iso))}%` : fmt(L.iso);
   const aw = activeWave();
@@ -1551,7 +1574,8 @@ const OPTIONS = [
   { t: "Label all atoms", sel: "#label-all", k: "label all labels every atom names symbols", self: true, before: () => setLabelMode(true) },
   { t: "Reset view", sel: "#btn-reset", k: "reset view fit home recenter camera", self: true },
   { t: "Open files", sel: "#btn-open", k: "open load import file replace", self: true },
-  { t: "Photo: save an image of the view", sel: "#btn-photo", k: "photo save image screenshot png picture snapshot export copy transparent high resolution print", self: true },
+  { t: "X-ray diffraction (XRD pattern)", sel: "#xrd-open", k: "xrd x-ray diffraction powder pattern bragg peaks hkl 2theta cu k alpha reflections", self: true },
+  { t: "Photo Mode: save an image of the view", sel: "#btn-photo", k: "photo save image screenshot png picture snapshot export copy transparent high resolution print", self: true },
   { t: "Embed in your website, use in Jupyter or Julia", sel: "#btn-use", k: "embed iframe website share jupyter julia notebook python pluto use elsewhere", self: true },
   { t: "New scene", sel: "#btn-new", k: "new scene clear start over reset", self: true },
   { t: "Brillouin zone", sel: "#bz", k: "brillouin zone reciprocal k-path kpath high symmetry points band structure bz wigner seitz" },
@@ -1653,7 +1677,10 @@ function bindSeg(key, fn) {
   document.querySelector(`.seg[data-key="${key}"]`).addEventListener("click", e => { const b = e.target.closest("button"); if (b) { fn(b.value); segState(); summaries(); } });
 }
 bindSeg("style", v => { S.style = v; buildStructure(); });
-bindSeg("look", v => { S.look = v; requestRender(); });
+bindSeg("look", v => {
+  S.look = v; requestRender();
+  if (!EMBED) try { localStorage.setItem("isoview-look", v); } catch (e) { /* storage unavailable */ }
+});
 bindSeg("res", v => { S.res = v; refreshSurfaces(); });
 bindSeg("proj", v => { S.proj = v; cam.ortho = v === "ortho"; requestRender(); });
 bindSeg("theme", v => {
@@ -1694,13 +1721,17 @@ $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStru
 $("species").addEventListener("change", e => {
   const el = e.target.dataset.el;
   if (!el) return;
-  if (e.target.type === "color") { S.colors.set(el, e.target.value); recolor(); speciesUI(); return; }
   if (e.target.checked) S.hide.delete(el); else S.hide.add(el);
   buildStructure(); summaries();
 });
-// live colour while the picker is open
-$("species").addEventListener("input", e => { if (e.target.type === "color" && e.target.dataset.el) { S.colors.set(e.target.dataset.el, e.target.value); recolor(); } });
-$("species").addEventListener("click", e => { const b = e.target.closest(".sp-rs"); if (b) { S.colors.delete(b.dataset.el); speciesUI(); recolor(); } });
+// an element's colour: the in-page picker, live; Default (or the default colour itself) removes the choice
+$("species").addEventListener("click", e => {
+  const b = e.target.closest(".sp-c");
+  if (!b) return;
+  const el = b.dataset.el;
+  openPicker(b, { value: elColor(el), def: colorOf(el), title: `${el} atoms`,
+    onInput: c => { if (c === colorOf(el)) S.colors.delete(el); else S.colors.set(el, c); recolor(); } });
+});
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
   S.reps[i] = Math.min(6, Math.max(1, Math.round(+e.target.value) || 1)); e.target.value = S.reps[i];
@@ -1744,9 +1775,6 @@ $("btn-reset").addEventListener("click", resetView);
 $("btn-home").addEventListener("click", showHome);
 $("btn-label").addEventListener("click", () => setLabelMode(!S.labelMode));
 $("e-region").addEventListener("click", () => setBoxMode(!S.boxMode));
-// colour of the selected atoms: live while the picker is open
-$("atom-color").addEventListener("input", e => { for (const s of S.sel) { const L = layerById(s.layer); if (L) S.atomColors.set(atomKey(L, s.src), e.target.value); } recolor(); });
-$("atom-color").addEventListener("change", () => updateSelectionBar());
 $("measure").addEventListener("click", e => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
@@ -1755,11 +1783,13 @@ $("measure").addEventListener("click", e => {
   else if (a === "delete") deleteSelected();
   else if (a === "cut") cutSurface();
   else if (a === "color") {
-    const inp = $("atom-color"), s0 = S.sel[0];
-    inp.value = s0 ? atomColor(layerById(s0.layer), disp.atoms[s0.i] || { el: "X", src: s0.src }) : "#888888";
-    try { inp.showPicker(); } catch (err) { inp.click(); }
+    // the selected atoms (every periodic image); Default gives each its element's colour again
+    const s0 = S.sel[0], a0 = s0 && disp.atoms[s0.i], keys = S.sel.map(s => { const L = layerById(s.layer); return L ? atomKey(L, s.src) : null; }).filter(Boolean);
+    if (!a0) return;
+    const def = elColor(a0.el), n = keys.length;
+    openPicker(b, { value: a0.color, def, title: n === 1 ? `${atomLabel(s0)}` : `${n} atoms`,
+      onInput: c => { for (const k of keys) { if (c === def) S.atomColors.delete(k); else S.atomColors.set(k, c); } recolor(); } });
   }
-  else if (a === "uncolor") { for (const s of S.sel) S.atomColors.delete(atomKey(layerById(s.layer), s.src)); recolor(); updateSelectionBar(); }
   else if (a === "edit") { tuck("tr", false); $("sec-edit").open = true; $("sec-edit").scrollIntoView({ block: "nearest" }); }
 });
 $("pl-play").addEventListener("click", () => play(!S.playing));
@@ -2300,7 +2330,10 @@ window.addEventListener("resize", () => { if (SL.on) drawSliceWindow(); });
 /* ------------------------------------------------------------------ trajectory analysis */
 // off: per tab, the curves switched off (by key); fq: the per-frame quantities shown
 // fmax: upper end of the VDOS axis in THz (null: automatic)
-const AN = { kind: "rdf", rmax: 8, freq: "THz", fmax: null, res: null, seq: 0, off: { rdf: new Set(), msd: new Set(), vacf: new Set() }, fq: new Set(["temperature"]) };
+// x: X-ray diffraction settings (radiation name or "custom" with lam in A, 2theta range t0-t1 and peak width fw in deg,
+// mode for trajectories: "frame" (follows the player), "avg" (average over frames) or "map" (2theta x time))
+const AN = { kind: "rdf", rmax: 8, freq: "THz", fmax: null, res: null, seq: 0, off: { rdf: new Set(), msd: new Set(), vacf: new Set(), xrd: new Set() }, fq: new Set(["temperature"]),
+  x: { rad: "Cu Kα", lam: 1.54184, t0: 10, t1: 90, fw: 0.1, mode: "frame", log: true } };
 const AN_COLORS = ["#3058d0", "#e3a03a", "#2bb3a3", "#d6456a", "#7cb342", "#9b7be0", "#ef7d4b", "#5c9bd6", "#a0785a", "#c05fb0"];
 const AN_TOTAL = "#6b7280";
 const THZ_TO_CM = 33.35641; // cm^-1 per THz
@@ -2318,26 +2351,55 @@ function anData(it) {
   return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
 }
 const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
+/** Time step field of the main trajectory: the value typed for it (it.dtUser), else its file's (traj.dt_fs, marked
+ *  "from the file"), else empty. Called from summaries(), so it follows the trajectory shown. */
+function syncDt() {
+  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || "" : "";
+  if (document.activeElement !== inp && String(inp.value) !== String(v)) inp.value = v;
+  $("an-dt-src").textContent = it && !it.dtUser && it.traj && it.traj.dt_fs ? "from the file" : "";
+}
 /** Opens the analysis window on tab kind and computes it. */
 function openAnalysis(kind) {
   AN.kind = kind;
   $("anwin").hidden = false;
   runAnalysis();
 }
-async function runAnalysis() {
-  const it = mainTraj();
-  for (const b of $("an-tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === AN.kind));
+/** The item XRD is computed for: the active atoms layer's, when it has a cell (a trajectory: its current frame). */
+const xrdItem = () => { const L = activeAtomsLayer(), it = L && itemOf(L); return it && it.structure && it.structure.pbc && it.structure.lattice ? it : null; };
+const xrdLambda = () => (AN.x.rad === "custom" ? AN.x.lam : WAVELENGTHS[AN.x.rad] || 1.54184);
+/** quiet: keep the current chart until the new one is ready (XRD following the player). */
+async function runAnalysis(quiet = false) {
+  const xrd = AN.kind === "xrd", it = xrd ? xrdItem() : mainTraj(), hasTraj = !!mainTraj();
+  // the trajectory tabs only with a trajectory, XRD only with a crystal
+  for (const b of $("an-tabs").querySelectorAll("button")) { b.setAttribute("aria-pressed", String(b.value === AN.kind)); b.hidden = b.value === "xrd" ? !xrdItem() : !hasTraj; }
   anOptions();
-  if (!it || $("anwin").hidden) return;
+  if ($("anwin").hidden) return;
+  if (xrd && !it) { AN.res = null; $("an-keys").innerHTML = ""; $("an-res").textContent = ""; $("an-plot").innerHTML = '<div class="an-wait">X-ray diffraction needs a crystal (a structure with a cell).</div>'; return; }
+  if (!it) return;
   const dt_fs = anDt(), seq = ++AN.seq;
+  if (xrd) {
+    const traj = !!it.traj && AN.x.mode !== "frame", o = { lambda: xrdLambda(), range: [AN.x.t0, AN.x.t1], fwhm: AN.x.fw };
+    if (!quiet) { AN.res = null; $("an-res").textContent = ""; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">Computing…${traj ? " (every frame, up to 200)" : ""}</div>`; }
+    try {
+      let r;
+      if (traj) { const d = anData(it); r = await call("xrd", { mode: "traj", structure: d.structure, traj: d.traj, opts: { ...o, maxFrames: 200 } }); }
+      else { const st = it.structure; r = await call("xrd", { mode: "one", structure: { species: st.species, lattice: st.lattice, pos: st.pos }, opts: o }); }
+      if (seq !== AN.seq) return;
+      AN.res = { kind: "xrd", r, name: it.name, mode: traj ? AN.x.mode : "frame", frame: it.traj ? S.frame : null, nFrames: it.traj ? it.traj.n : 0, dt: dt_fs, href: null, st: it.structure, it };
+      drawAnalysis();
+    } catch (e) { if (seq === AN.seq) { AN.res = null; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">${esc(e.message || String(e))}</div>`; } }
+    return;
+  }
   AN.res = null; $("an-res").textContent = "";
-  if (AN.kind === "vacf" && !dt_fs) { $("an-keys").innerHTML = ""; $("an-plot").innerHTML = '<div class="an-wait">The VDOS needs the time between saved frames: set Time step in the Trajectory panel.</div>'; return; }
   $("an-plot").innerHTML = '<div class="an-wait">Computing…</div>'; $("an-keys").innerHTML = "";
   const { structure, traj } = anData(it);
   try {
-    const r = await call("analysis", { kind: AN.kind, structure, traj, opts: AN.kind === "rdf" ? { rmax: AN.rmax } : { dt_fs } });
+    // WHY: the VDOS needs a time step; without one it is drawn for 1 fs per frame and says so (its frequencies scale
+    // as 1 / time step), MSD and per-frame series stay in frames
+    const assumed = AN.kind === "vacf" && !dt_fs;
+    const r = await call("analysis", { kind: AN.kind, structure, traj, opts: AN.kind === "rdf" ? { rmax: AN.rmax } : { dt_fs: assumed ? 1 : dt_fs } });
     if (seq !== AN.seq) return;
-    AN.res = { kind: AN.kind, r, name: it.name };
+    AN.res = { kind: AN.kind, r, name: it.name, it, assumed };
     drawAnalysis();
   } catch (e) { if (seq === AN.seq) $("an-plot").innerHTML = `<div class="an-wait">${esc(e.message || String(e))}</div>`; }
 }
@@ -2346,7 +2408,89 @@ function anOptions() {
   const o = $("an-opts");
   if (AN.kind === "rdf") o.innerHTML = `<label>r max <input type="number" id="an-rmax" min="1" max="30" step="0.5" value="${AN.rmax}"> Å</label>`;
   else if (AN.kind === "vacf") o.innerHTML = `<div class="seg2" id="an-freq"><button type="button" value="THz" aria-pressed="${AN.freq === "THz"}">THz</button><button type="button" value="cm" aria-pressed="${AN.freq === "cm"}">cm⁻¹</button></div><label>up to <input type="number" id="an-fmax" min="0" step="any" placeholder="auto" value="${AN.fmax ? +(AN.fmax * (AN.freq === "cm" ? THZ_TO_CM : 1)).toPrecision(4) : ""}"></label>`;
+  else if (AN.kind === "xrd") {
+    const it = xrdItem(), x = AN.x;
+    o.innerHTML = `<select id="an-rad" aria-label="Radiation">${Object.keys(WAVELENGTHS).map(r => `<option${r === x.rad ? " selected" : ""}>${r}</option>`).join("")}<option value="custom"${x.rad === "custom" ? " selected" : ""}>λ in Å</option></select>` +
+      (x.rad === "custom" ? `<input type="number" id="an-lam" min="0.1" max="10" step="any" value="${x.lam}" aria-label="Wavelength in Å">` : "") +
+      `<label>2θ <input type="number" id="an-t0" min="0" max="170" step="1" value="${x.t0}" aria-label="2θ from (°)">–<input type="number" id="an-t1" min="1" max="179" step="1" value="${x.t1}" aria-label="2θ to (°)">°</label>` +
+      `<label title="Full width at half maximum of each peak">width <input type="number" id="an-fw" min="0.01" max="5" step="0.01" value="${x.fw}">°</label>` +
+      (it && it.traj && x.mode === "map" ? `<div class="seg2" id="an-xscale" title="Colour scale of the map">${[["log", "log"], ["lin", "linear"]].map(([v, t]) => `<button type="button" value="${v}" aria-pressed="${(v === "log") === x.log}">${t}</button>`).join("")}</div>` : "") +
+      (it && it.traj ? `<div class="seg2" id="an-xmode" title="Frame: the pattern of the frame shown (follows the player); Average: over the frames; Map: 2θ against time">${[["frame", "Frame"], ["avg", "Average"], ["map", "Map"]].map(([v, t]) => `<button type="button" value="${v}" aria-pressed="${x.mode === v}">${t}</button>`).join("")}</div>` : "");
+  }
   else o.innerHTML = "";
+}
+// XRD following the player: one computation at a time, the latest frame next
+let xrdBusy = false, xrdAgain = false;
+async function xrdFollow() {
+  if (xrdBusy) { xrdAgain = true; return; }
+  xrdBusy = true;
+  try { await runAnalysis(true); } finally { xrdBusy = false; }
+  if (xrdAgain) { xrdAgain = false; xrdFollow(); }
+}
+/** Map image (data URL): one row per computed frame, latest at the top, viridis over 0-100 (linear) or over
+ *  log10 I from 0.1 to 100 (log); at most 1200 columns, each the largest value of the points it covers (narrow Bragg
+ *  peaks stay visible when the image is drawn small). "" without a 2D canvas. */
+function xrdHeatURL(r, log) {
+  try {
+    const nx = r.x.length, nf = r.frames.length, W = Math.min(nx, 1200), c = document.createElement("canvas");
+    c.width = W; c.height = nf;
+    const g = c.getContext("2d"), img = g.createImageData(W, nf), T = new Uint8Array(768);
+    for (let i = 0; i < 256; i++) T.set(colormap("viridis", i / 255), 3 * i);
+    const level = I => (log ? (Math.log10(Math.max(I, 0.1)) + 1) / 3 : I / 100);
+    for (let row = 0; row < nf; row++) for (let col = 0; col < W; col++) {
+      let m = 0;
+      for (let i = Math.floor(col * nx / W), e = Math.max(i + 1, Math.floor((col + 1) * nx / W)); i < e; i++) m = Math.max(m, r.map[row * nx + i]);
+      const v = Math.max(0, Math.min(255, Math.round(255 * level(m)))), o = 4 * ((nf - 1 - row) * W + col);
+      img.data[o] = T[3 * v]; img.data[o + 1] = T[3 * v + 1]; img.data[o + 2] = T[3 * v + 2]; img.data[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return c.toDataURL("image/png");
+  } catch (e) { return ""; }
+}
+/** XRD chart: one pattern (profile, peak sticks, hkl labels of the strongest peaks, each switchable), the average
+ *  over frames, or the 2theta x time map with a line at the frame shown. */
+function xrdChart(keys, key) {
+  const R0 = AN.res, r = R0.r, lam = r.lambda, rad = AN.x.rad === "custom" ? "" : AN.x.rad + " ", xl = "2*θ* (°)";
+  const head = `${rad}λ = ${lam} Å`;
+  if (r.map) {
+    const k = R0.dt ? R0.dt / 1000 : 1, t = r.frames.map(f => (R0.dt ? f * k : f + 1)), y0 = t[0], y1 = t.length > 1 ? t[t.length - 1] : t[0] + 1, ylab = R0.dt ? "*t* (ps)" : "frame";
+    if (R0.mode === "avg") return { panels: [{ series: [{ label: "average", x: r.x, y: r.avg, color: AN_COLORS[0], width: 1.3 }], ylabel: "intensity (rel.)", zero: true }], keys, xlabel: xl, xr: [r.x[0], r.x[r.x.length - 1]],
+      text: `${head} · average over ${r.frames.length} of ${R0.nFrames} frames · peak width ${r.fwhm}°`, xname: "2theta (deg)" };
+    if (R0.href === null || R0.hrefLog !== AN.x.log) { R0.href = xrdHeatURL(r, AN.x.log); R0.hrefLog = AN.x.log; }
+    const now = R0.dt ? S.frame * k : S.frame + 1, series = now >= y0 && now <= y1 ? [{ label: "", x: [r.x[0], r.x[r.x.length - 1]], y: [now, now], color: "#ffffff", dash: true, width: 1 }] : [];
+    return { panels: [{ series, ylabel: ylab, yr: [y0, y1], heat: { href: R0.href, x0: r.x[0], x1: r.x[r.x.length - 1], y0, y1, stops: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map(v => `rgb(${colormap("viridis", v).join(",")})`), lo: AN.x.log ? 0.1 : 0, hi: 100 } }],
+      keys, xlabel: xl, xr: [r.x[0], r.x[r.x.length - 1]], text: `${head} · ${r.frames.length} of ${R0.nFrames} frames, one intensity scale (strongest 100, colours ${AN.x.log ? "logarithmic from 0.1" : "linear"}) · dashed: the frame shown`, xname: "2theta (deg)" };
+  }
+  const series = [], showP = key("profile", "profile", AN_COLORS[0]);
+  if (showP) series.push({ label: "", x: r.x, y: r.y, color: AN_COLORS[0], width: 1.3 });
+  if (key("peaks", "peaks", AN_TOTAL)) {
+    const sx = [], sy = [];
+    for (const p of r.peaks) sx.push(p.tth, p.tth, NaN), sy.push(0, p.I, NaN);
+    series.push({ label: "", x: sx, y: sy, color: AN_TOTAL, width: 1 });
+  }
+  const showH = key("hkl", "hkl", AN_TOTAL), step = r.x.length > 1 ? r.x[1] - r.x[0] : 1;
+  const labels = showH ? r.peaks.filter(p => p.I >= 3).sort((a, b) => b.I - a.I).slice(0, 16)
+    .map(p => ({ x: p.tth, y: Math.max(p.I, showP ? r.y[Math.max(0, Math.min(r.y.length - 1, Math.round((p.tth - r.x[0]) / step)))] : 0), text: hklText(p.fam[0].hkl) })) : [];
+  const strong = r.peaks.slice().sort((a, b) => b.I - a.I).slice(0, 8).sort((a, b) => a.tth - b.tth);
+  const lines = strong.map(p => `${p.tth.toFixed(2).padStart(7)}°  d ${p.d.toFixed(4)} Å  I ${p.I.toFixed(1).padStart(5)}  ${p.fam.map(f => `${hklText(f.hkl)} ×${f.m}`).join(", ")}`);
+  return { panels: [{ series, labels, ylabel: "intensity (rel.)", yr: [0, showH ? 128 : 105] }], keys, xlabel: xl, xr: [r.x[0], r.x[r.x.length - 1]],
+    text: `${R0.frame !== null ? `frame ${R0.frame + 1} · ` : ""}${head} · ${r.peaks.length} peaks in ${r.range[0]}–${r.range[1]}° · strongest:\n${lines.join("\n")}`, xname: "2theta (deg)" };
+}
+/** CSV of the XRD result: one pattern (profile columns, then the peak list: 2theta, d, intensity, hkl families with
+ *  multiplicities), the average, or the map (a row per frame). */
+function xrdCSV() {
+  const R0 = AN.res, r = R0.r, q = s => `"${String(s).replace(/"/g, '""')}"`, plainHkl = v => v.join(" ");
+  if (r.map && R0.mode === "map") {
+    const head = [R0.dt ? "t (ps)" : "frame", ...Array.from(r.x, v => v.toFixed(3))].join(","), nx = r.x.length;
+    return [head, ...r.frames.map((f, row) => [R0.dt ? (f * R0.dt / 1000).toPrecision(6) : f + 1, ...Array.from(r.map.subarray(row * nx, (row + 1) * nx), v => +v.toFixed(4))].join(","))].join("\n") + "\n";
+  }
+  if (r.map) return ["2theta (deg),intensity (average)", ...Array.from(r.x, (v, i) => `${v.toFixed(3)},${r.avg[i].toFixed(5)}`)].join("\n") + "\n";
+  const n = Math.max(r.x.length, r.peaks.length), rows = [["2theta (deg)", "profile", "", "peak 2theta (deg)", "d (A)", "intensity", "hkl (multiplicity)"].map(q).join(",")];
+  for (let i = 0; i < n; i++) {
+    const p = r.peaks[i];
+    rows.push([i < r.x.length ? r.x[i].toFixed(3) : "", i < r.x.length ? r.y[i].toFixed(5) : "", "", p ? p.tth.toFixed(5) : "", p ? p.d.toFixed(6) : "", p ? p.I.toFixed(4) : "", p ? q(p.fam.map(f => `${plainHkl(f.hkl)} (${f.m})`).join("; ")) : ""].join(","));
+  }
+  return rows.join("\n") + "\n";
 }
 /** First peak of g(r) and the first minimum after it (indices), for coordination numbers. g is first smoothed by a
  *  running mean over +-w bins (w = 0.1 A / dr) so that noise does not end the shell early; the minimum is the lowest
@@ -2365,6 +2509,7 @@ function firstShell(g, dr) {
  *  on are in panels and in the text; colours stay tied to the curve whichever others are off. */
 function anChart() {
   const { kind, r } = AN.res, off = AN.off[kind] || new Set(), keys = [], key = (k, label, color, dash) => { const on = !off.has(k); keys.push({ key: k, label, color, dash, on }); return on; };
+  if (kind === "xrd") return xrdChart(keys, key);
   if (kind === "rdf") {
     if (!r.total.g) return { panels: [{ series: [{ label: "all atoms", x: r.rEdge, y: r.total.n, color: AN_TOTAL }], ylabel: "neighbours within *r*" }], keys, xlabel: "*r* (Å)", text: "No cell: neighbour counts instead of g(r).", xname: "r (A)" };
     const series = [], lines = [];
@@ -2400,7 +2545,7 @@ function anChart() {
     if (r.elements.length > 1) r.elements.forEach((e, i) => { const c = AN_COLORS[i % AN_COLORS.length]; if (key(e.el, e.el, c)) series.push({ label: e.el, x, y: Array.from(e.vdos, v => v * k), color: c }); });
     const f = v => (cm ? `${(v * THZ_TO_CM).toFixed(0)} cm⁻¹` : `${v.toPrecision(3)} THz`), top = (AN.fmax || vdosEnd(r)) * (cm ? THZ_TO_CM : 1);
     return { panels: [{ series, ylabel: cm ? "VDOS (1/cm⁻¹)" : "VDOS (1/THz)", zero: true }], keys, xlabel: cm ? "frequency (cm⁻¹)" : "frequency (THz)", xr: [0, top],
-      text: `resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
+      text: `${AN.res.assumed ? "Time step not set: 1 fs per frame assumed (frequencies scale as 1 / time step; set it in the Trajectory panel)\n" : ""}resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
   }
   // per frame: each chosen quantity in its own panel over a shared time axis; a, b, c share one panel
   const have = AN_Q.filter(q => r[q.k] && Array.from(r[q.k]).some(Number.isFinite));
@@ -2447,24 +2592,56 @@ function anFigure(c, paper) {
   const big = $("anwin").classList.contains("big");
   return { ...c, W: big ? 800 : 520, H: (big ? 420 : 300) + (big ? 150 : 110) * (k - 1), fs: big ? 12 : 11 };
 }
+/** Draws the current result. The chart's height is lowered (to a floor of 150 + 70 per extra panel SVG units) so the
+ *  whole window fits between its anchor and the edge of the page: the bottom anchor when it was not moved, else its
+ *  top; the window then scrolls rather than leave the page. */
 function drawAnalysis() {
   if (!AN.res) return;
   anOptions();
-  const c = anChart();
-  $("an-plot").innerHTML = chart(anFigure(c, false));
+  const c = anChart(), fig = anFigure(c, false), win = $("anwin"), plotBox = $("an-plot");
   $("an-keys").innerHTML = c.keys.length > 1 ? c.keys.map(q => `<button type="button" data-key="${esc(q.key)}" aria-pressed="${q.on}" title="${q.on ? "Hide" : "Show"} ${esc(q.label)}"><i class="${q.dash ? "d" : ""}" style="--c:${q.color}"></i>${esc(q.label)}</button>`).join("") : "";
   $("an-res").textContent = c.text || "";
+  const pw = plotBox.clientWidth;
+  if (pw > 0 && !win.hidden) {
+    plotBox.innerHTML = "";
+    const r = win.getBoundingClientRect(), moved = win.style.top && win.style.top !== "auto";
+    const room = (moved ? window.innerHeight - r.top : r.bottom) - 12, rest = win.offsetHeight - plotBox.offsetHeight;
+    const k = Math.max(1, c.panels.length), floor = 150 + 70 * (k - 1), maxH = (room - rest) * fig.W / pw;
+    fig.H = Math.round(Math.max(floor, Math.min(fig.H, maxH)));
+  }
+  plotBox.innerHTML = chart(fig);
 }
 $("an-open").addEventListener("click", e => { const b = e.target.closest("[data-an]"); if (b) openAnalysis(b.dataset.an); });
 $("an-tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { AN.kind = b.value; runAnalysis(); } });
 $("an-x").addEventListener("click", () => { $("anwin").hidden = true; AN.seq++; });
+window.addEventListener("resize", () => { if (!$("anwin").hidden && AN.res) drawAnalysis(); });
 $("an-big").addEventListener("click", () => { const on = !$("anwin").classList.contains("big"); $("anwin").classList.toggle("big", on); $("an-big").setAttribute("aria-pressed", String(on)); drawAnalysis(); });
-$("an-dt").addEventListener("change", () => { if (!$("anwin").hidden && AN.kind !== "rdf") runAnalysis(); });
+$("an-dt").addEventListener("change", () => {
+  const it = mainTraj(); if (it) it.dtUser = anDt() || null;
+  syncDt(); saveSoon();
+  if (!$("anwin").hidden && AN.kind !== "rdf") runAnalysis();
+});
 $("an-opts").addEventListener("change", e => {
+  const xi = { "an-t0": "t0", "an-t1": "t1", "an-fw": "fw", "an-lam": "lam" }[e.target.id];
+  if (xi) {
+    const v = parseFloat(e.target.value), lim = { t0: [0, 170], t1: [1, 179], fw: [0.01, 5], lam: [0.1, 10] }[xi];
+    if (Number.isFinite(v)) AN.x[xi] = Math.min(lim[1], Math.max(lim[0], v));
+    if (AN.x.t1 <= AN.x.t0 + 1) AN.x.t1 = Math.min(179, AN.x.t0 + 1);
+    runAnalysis(); return;
+  }
+  if (e.target.id === "an-rad") { AN.x.rad = e.target.value; runAnalysis(); return; }
   if (e.target.id === "an-fmax") { const v = parseFloat(e.target.value); AN.fmax = v > 0 ? v / (AN.freq === "cm" ? THZ_TO_CM : 1) : null; drawAnalysis(); }
   if (e.target.id === "an-rmax") { AN.rmax = Math.min(30, Math.max(1, +e.target.value || 8)); runAnalysis(); }
 });
-$("an-opts").addEventListener("click", e => { const b = e.target.closest("#an-freq button"); if (b) { AN.freq = b.value; drawAnalysis(); } });
+$("an-opts").addEventListener("click", e => {
+  const b = e.target.closest("#an-freq button");
+  if (b) { AN.freq = b.value; drawAnalysis(); }
+  const sc = e.target.closest("#an-xscale button");
+  if (sc) { AN.x.log = sc.value === "log"; drawAnalysis(); }
+  const m = e.target.closest("#an-xmode button");
+  if (m && m.value !== AN.x.mode) { AN.x.mode = m.value; runAnalysis(); }
+});
+$("xrd-open").addEventListener("click", () => openAnalysis("xrd"));
 // a curve chip switches its curve on or off; per frame, at least one quantity stays on
 $("an-keys").addEventListener("click", e => {
   const b = e.target.closest("[data-key]");
@@ -2475,7 +2652,10 @@ $("an-keys").addEventListener("click", e => {
   drawAnalysis();
 });
 const anFile = ext => `${(AN.res ? AN.res.name : "trajectory").replace(/[^\w.+-]+/g, "_")}-${AN.kind === "vacf" ? "vdos" : AN.kind}.${ext}`;
-$("an-csv").addEventListener("click", () => { if (!AN.res) return; const c = anChart(); download(new Blob([toCSV(c.panels.flatMap(p => p.series).filter(s => s.label), c.xname || "x")], { type: "text/csv" }), anFile("csv")); });
+$("an-csv").addEventListener("click", () => {
+  if (!AN.res) return;
+  if (AN.res.kind === "xrd") { download(new Blob([xrdCSV()], { type: "text/csv" }), anFile("csv")); return; }
+  const c = anChart(); download(new Blob([toCSV(c.panels.flatMap(p => p.series).filter(s => s.label), c.xname || "x")], { type: "text/csv" }), anFile("csv")); });
 $("an-svg").addEventListener("click", () => { if (!AN.res) return; download(new Blob([chart(anFigure(anChart(), true))], { type: "image/svg+xml" }), anFile("svg")); });
 /** The saved figure as PNG at 600 dpi on white: the paper SVG drawn onto a canvas. */
 $("an-png").addEventListener("click", () => {

@@ -8,7 +8,7 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=29">
+<link rel="stylesheet" href="css/style.css?v=30">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -22,7 +22,7 @@
   <div class="doc" id="doc" hidden><span id="doc-name"></span><span id="doc-sub"></span></div>
   <span class="sgchip" id="doc-sg" hidden></span>
   <button type="button" class="newscene" id="btn-new" hidden title="Clear the scene and start again (it can be undone)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>New scene</button>
-  <button type="button" class="newscene" id="btn-photo" hidden title="Photo: hide the controls and save a sharp image of the view (S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Photo</button>
+  <button type="button" class="newscene" id="btn-photo" hidden title="Photo Mode: hide the controls and save a sharp image of the view (S)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Photo Mode</button>
 </header>
 
 <aside class="dock glass corner" id="dock" hidden>
@@ -74,6 +74,7 @@
       <div class="row" id="row-bzi" hidden><label class="lab" for="bzi">Crystal inset</label><input type="checkbox" class="sw" id="bzi" checked title="A small view of the crystal that turns with the zone"></div>
       <div class="row pbc"><span class="lab">Repeat</span><div class="reps"><input type="number" id="ra" min="1" max="6" value="1" aria-label="repeat along a"><span>×</span><input type="number" id="rb" min="1" max="6" value="1" aria-label="repeat along b"><span>×</span><input type="number" id="rc" min="1" max="6" value="1" aria-label="repeat along c"></div></div>
       <div class="row pbc"><label class="lab" for="boundary">Boundary atoms</label><input type="checkbox" class="sw" id="boundary" checked></div>
+      <div class="row pbc"><span class="lab">X-ray diffraction</span><button type="button" class="ghost" id="xrd-open" title="Powder X-ray diffraction pattern of this crystal, with hkl">XRD pattern</button></div>
     </div>
   </details>
 
@@ -115,8 +116,8 @@
       <div class="row"><span class="lab">At the end</span><div class="seg" data-key="loop"><button type="button" value="loop">Loop</button><button type="button" value="bounce">Bounce</button><button type="button" value="once">Stop</button></div></div>
       <div class="spark" id="tr-spark" hidden><svg id="tr-svg" aria-label="Energy of each frame; click to go to a frame"></svg><div class="spark-r"><span id="tr-e-range"></span><span id="tr-e-now"></span></div></div>
       <div class="sub-h">Analysis</div>
-      <div class="row"><label class="lab" for="an-dt">Time step</label><div class="reps"><input type="number" id="an-dt" min="0" step="any" placeholder="?" aria-label="time between saved frames, fs"><span>fs per frame</span></div></div>
-      <div class="tool-row pad" id="an-open"><button type="button" data-an="rdf" title="Radial distribution function g(r), total and per element pair, with coordination numbers">RDF</button><button type="button" data-an="msd" title="Mean squared displacement per element and the diffusion coefficient">MSD</button><button type="button" data-an="vacf" title="Vibrational density of states from the velocity autocorrelation (needs the time step)">VDOS</button><button type="button" data-an="frames" title="Energy, temperature estimate, volume, density and cell lengths per frame">Per frame</button></div>
+      <div class="row"><label class="lab" for="an-dt">Time step</label><div class="reps"><input type="number" id="an-dt" min="0" step="any" placeholder="?" aria-label="time between saved frames, fs"><span>fs per frame</span><em class="dt-src" id="an-dt-src"></em></div></div>
+      <div class="tool-row pad" id="an-open"><button type="button" data-an="rdf" title="Radial distribution function g(r), total and per element pair, with coordination numbers">RDF</button><button type="button" data-an="msd" title="Mean squared displacement per element and the diffusion coefficient">MSD</button><button type="button" data-an="vacf" title="Vibrational density of states from the velocity autocorrelation (needs the time step)">VDOS</button><button type="button" data-an="frames" title="Energy, temperature estimate, volume, density and cell lengths per frame">Per frame</button><button type="button" data-an="xrd" title="X-ray diffraction: of the frame shown, averaged over the frames, or as a map against time">XRD</button></div>
       <div class="sub-h">Movie</div>
       <div class="row"><span class="lab">Format</span><div class="seg" data-key="mfmt"><button type="button" value="gif">GIF</button><button type="button" value="video" id="mfmt-video">Video</button></div></div>
       <div class="row"><label class="lab" for="mv-fps">Movie speed</label><div class="reps"><input type="number" id="mv-fps" min="1" max="60" value="12" aria-label="movie frames per second"><span>fps</span></div></div>
@@ -165,12 +166,12 @@
   <div class="seg2 use-tabs" id="use-tabs" role="tablist" aria-label="Where" hidden><button type="button" value="web">Website</button><button type="button" value="jupyter">Jupyter</button><button type="button" value="julia">Julia</button></div>
   <div id="use-body"></div>
 </div>
-<div class="photobar glass" id="photobar" role="toolbar" aria-label="Photo" hidden>
+<div class="photobar glass" id="photobar" role="toolbar" aria-label="Photo Mode" hidden>
   <span class="ph-lab">Size</span>
   <div class="seg2" id="ph-size" role="group" aria-label="Image size"><button type="button" value="screen" title="As the screen shows it">Screen</button><button type="button" value="2" title="Twice the window size">2×</button><button type="button" value="4" title="Four times the window size">4×</button></div>
   <span class="ph-px" id="ph-px"></span>
   <span class="ph-lab">Background</span>
-  <div class="seg2" id="ph-bg" role="group" aria-label="Background"><button type="button" value="scene">Theme</button><button type="button" value="white">White</button><button type="button" value="clear" title="Transparent PNG (shown here on the theme background)">None</button></div>
+  <div class="seg2" id="ph-bg" role="group" aria-label="Background"><button type="button" value="scene">Theme</button><button type="button" value="white">White</button><button type="button" value="clear" title="Transparent PNG (shown here on the theme background)">Transparent</button></div>
   <span class="ph-acts"><button type="button" class="ph-b" id="ph-copy" title="Copy the image">Copy</button><button type="button" class="ph-b strong" id="ph-save" title="Save the image as PNG (S)">Save PNG</button><button type="button" class="ph-b" id="ph-done" title="Leave photo mode (Esc)">Done</button></span>
 </div>
 <div class="bzinset glass" id="bzinset" hidden>
@@ -206,7 +207,7 @@
 </div>
 <div class="anwin glass" id="anwin" role="dialog" aria-label="Trajectory analysis" hidden>
   <div class="sl-head" id="an-head">
-    <div class="seg2" id="an-tabs" role="group" aria-label="Analysis"><button type="button" value="rdf">RDF</button><button type="button" value="msd">MSD</button><button type="button" value="vacf">VDOS</button><button type="button" value="frames">Per frame</button></div>
+    <div class="seg2" id="an-tabs" role="group" aria-label="Analysis"><button type="button" value="rdf">RDF</button><button type="button" value="msd">MSD</button><button type="button" value="vacf">VDOS</button><button type="button" value="frames">Per frame</button><button type="button" value="xrd">XRD</button></div>
     <span class="sl-sp"></span>
     <button type="button" class="sl-ic" id="an-big" title="Larger" aria-label="Larger" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 13.5 10.5M4.5 19.5l6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button type="button" class="sl-ic" id="an-x" title="Close" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
@@ -217,7 +218,6 @@
   <div class="sl-opts"><span id="an-opts" class="an-opts"></span><span class="sl-sp"></span><button type="button" class="sl-save" id="an-csv" title="The curves shown, as CSV">CSV</button><button type="button" class="sl-save" id="an-svg" title="The figure as SVG, 3.5 in wide (one journal column), only the curves shown">SVG</button><button type="button" class="sl-save" id="an-png" title="The figure as PNG at 600 dpi, 3.5 in wide, only the curves shown">PNG</button></div>
 </div>
 <div class="pill glass" id="measure" hidden></div>
-<input type="color" id="atom-color" class="picker-anchor" tabindex="-1" aria-hidden="true">
 <div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-all" title="Label every atom drawn">Label all</button><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong" title="Leave label mode (L); the labels stay">Done</button></div>
 
 <section id="empty">
@@ -251,6 +251,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=29"></script>
+<script type="module" src="js/app.js?v=30"></script>
 </body>
 </html>
