@@ -1,6 +1,7 @@
 # Typefaces
 
-Inter and Source Code Pro are the interface typefaces of the live site. The others are candidates offered by
+Inter is the interface typeface of the live site (numbers and file names included); Source Code Pro sets its code
+snippets and column-aligned text. The others are candidates offered by
 the pickers on the test site. Each file is a Modified Version under the SIL Open Font License 1.1 (licence texts
 beside them): cut to weights 400 to 600 (other variation axes fixed at their defaults, optical size 14, width 100),
 subset to the characters isoview prints (Latin-1, Greek, sub- and superscripts, combining overbars, units and math

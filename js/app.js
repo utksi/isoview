@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1006";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1006";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1006";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1006";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1006";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1006";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1006";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=1006";
-import { measureAll } from "./measure.js?v=1006";
-import { GifWriter, buildPalette } from "./gif.js?v=1006";
-import * as store from "./store.js?v=1006";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1006";
-import { chart, toCSV } from "./plot.js?v=1006";
-import { openPicker } from "./picker.js?v=1006";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=1006";
-import { colormap } from "./slice.js?v=1006";
-import { wignerSeitz, kpath } from "./bz.js?v=1006";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=38";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=38";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=38";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=38";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=38";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=38";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=38";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=38";
+import { measureAll } from "./measure.js?v=38";
+import { GifWriter, buildPalette } from "./gif.js?v=38";
+import * as store from "./store.js?v=38";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=38";
+import { chart, toCSV } from "./plot.js?v=38";
+import { openPicker } from "./picker.js?v=38";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=38";
+import { colormap } from "./slice.js?v=38";
+import { wignerSeitz, kpath } from "./bz.js?v=38";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -169,7 +169,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1006", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=38", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -2008,7 +2008,7 @@ try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () =
 const TEST_FONTS = [{"id":"inter","label":"Inter","kind":"text","family":"Inter","note":""},{"id":"source","label":"Source Sans 3","kind":"text","family":"isoview S3","note":""},{"id":"plex","label":"IBM Plex Sans","kind":"text","family":"isoview PX","note":"no ⁻"},{"id":"fira","label":"Fira Sans","kind":"text","family":"Fira Sans","note":""},{"id":"lato","label":"Lato","kind":"text","family":"isoview LT","note":""},{"id":"noto","label":"Noto Sans","kind":"text","family":"Noto Sans","note":"no arrows"},{"id":"opensans","label":"Open Sans","kind":"text","family":"Open Sans","note":"no ⁻"},{"id":"roboto","label":"Roboto","kind":"text","family":"Roboto","note":"no overbar"},{"id":"manrope","label":"Manrope","kind":"text","family":"Manrope","note":"no overbar"},{"id":"commissioner","label":"Commissioner","kind":"text","family":"Commissioner","note":"no ⁻"},{"id":"sourcecode","label":"Source Code Pro","kind":"mono","family":"isoview SCP","note":"no ⁻"},{"id":"jetbrains","label":"JetBrains Mono","kind":"mono","family":"JetBrains Mono","note":"no ⁻"},{"id":"plexmono","label":"IBM Plex Mono","kind":"mono","family":"isoview PXM","note":"no Greek"},{"id":"firamono","label":"Fira Mono","kind":"mono","family":"Fira Mono","note":""},{"id":"notomono","label":"Noto Sans Mono","kind":"mono","family":"Noto Sans Mono","note":""},{"id":"robotomono","label":"Roboto Mono","kind":"mono","family":"Roboto Mono","note":"no subscripts"}];
 if (store.CHANNEL) {
   const SYS = { text: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' };
-  const DEF = { text: "inter", mono: "sourcecode" }; // WHY: the live site's faces, so the test site starts where live is
+  const DEF = { text: "inter", mono: "text" }; // WHY: the live site's faces, so the test site starts where live is
   const pick = (kind, id, save) => {
     const f = TEST_FONTS.find(x => x.kind === kind && x.id === id);
     // mono "text": numbers and file names in the text face, with tabular (equal-width) digits everywhere

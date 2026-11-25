@@ -23,8 +23,8 @@
  * electron over the cell (1/A^3); the signed Gamma-only orbital to int psi^2 dV = 1 (A^-3/2). Only the smooth
  * part of the PAW orbital is available (no augmentation inside the spheres).
  */
-import { fft3, nextPow2 } from "./fft.js?v=1006";
-import { det3, inv3 } from "./lattice.js?v=1006";
+import { fft3, nextPow2 } from "./fft.js?v=38";
+import { det3, inv3 } from "./lattice.js?v=38";
 
 const C = 0.262465831;
 
