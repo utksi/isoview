@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=33";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=33";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=33";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=33";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=33";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=33";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=33";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=33";
-import { measureAll } from "./measure.js?v=33";
-import { GifWriter, buildPalette } from "./gif.js?v=33";
-import * as store from "./store.js?v=33";
-import { contours, scaler, paint, lut, barTicks, figureLayout, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=33";
-import { chart, toCSV } from "./plot.js?v=33";
-import { openPicker } from "./picker.js?v=33";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=33";
-import { colormap } from "./slice.js?v=33";
-import { wignerSeitz, kpath } from "./bz.js?v=33";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=34";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=34";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=34";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=34";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=34";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=34";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=34";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=34";
+import { measureAll } from "./measure.js?v=34";
+import { GifWriter, buildPalette } from "./gif.js?v=34";
+import * as store from "./store.js?v=34";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=34";
+import { chart, toCSV } from "./plot.js?v=34";
+import { openPicker } from "./picker.js?v=34";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=34";
+import { colormap } from "./slice.js?v=34";
+import { wignerSeitz, kpath } from "./bz.js?v=34";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -161,7 +161,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=33", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=34", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1496,10 +1496,13 @@ function showHome() {
   back.hidden = !S.layers.length;
   if (S.layers.length) back.textContent = `Back to ${$("doc-name").textContent}`;
 }
-/** Samples on the opening page (examples/, see examples/README.md for each file's source); h3d is computed. */
+/** Samples on the opening page (examples/, see examples/README.md for each file's source); h3d is computed. An entry
+ *  may set a supercell (reps) and open a slice (slice: plane hkl, position t, scale, main view). */
 const SAMPLES = {
   rutile: "rutile-TiO2.cif", sto: "SrTiO3.vasp", zno: "ZnO-wurtzite.xsf", graphene: { file: "graphene.pw.in", reps: [2, 2, 1] }, nacl: "NaCl.geometry.in", c60: "C60.xyz",
-  ethanol: "ethanol.pdb", si: "Si-model.CHGCAR", elf: "C4.ELFCAR.gz", locpot: "Li.LOCPOT.gz", n2: "N2.WAVECAR", benzene: "benzene-pi.cube",
+  ethanol: "ethanol.pdb", si: "Si-model.CHGCAR",
+  // WHY: the (110) plane at t = 0.5 holds the zigzag Si-Si chains (x + y = a); two cells along c show two whole chains
+  sislice: { file: "Si-model.CHGCAR", reps: [1, 1, 2], slice: { hkl: [1, 1, 0], t: 0.5, scale: "lin", main: "2d" } }, elf: "C4.ELFCAR.gz", locpot: "Li.LOCPOT.gz", n2: "N2.WAVECAR", benzene: "benzene-pi.cube",
   vasprun: "LGPS-800K.vasprun.xml.gz", outcar: "LiPON-relax.OUTCAR.gz", lisi: "LiSi-md.XDATCAR", pwmd: "Si8-md.pw.out", castep: "Si-relax.geom",
   cu55: "Cu55-900K.traj", pt38: "Pt38-relax.extxyz", al: "Al-800K.XDATCAR", ag: "Ag-1600K.lammpstrj", ni: "Ni100-adatom-1100K.axsf",
 };
@@ -1521,6 +1524,13 @@ async function example(id) {
       // a sample shown as a supercell (graphene 2 x 2)
       S.reps = spec.reps.slice(); ["ra", "rb", "rc"].forEach((k, i) => ($(k).value = S.reps[i]));
       buildStructure(); fit(); refreshSurfaces(); summaries(); requestRender();
+    }
+    if (spec.slice && S.layers.length) {
+      const c = spec.slice;
+      Object.assign(SL, { hkl: c.hkl.slice(), t: c.t, scale: c.scale, atoms: true });
+      $("sl-hkl").value = c.hkl.join(" "); $("sl-t").value = c.t; $("sl-atoms").checked = true;
+      SV.main = c.main;
+      setSliceOn(true);
     }
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
@@ -2134,7 +2144,7 @@ async function renderPhoto() {
   try {
     if (mode === "2d") {
       if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
-      if (fine) drawSlice2D(g, 0, 0, w, h, s, fine, mainPad(), SL_FS);
+      if (fine) drawSlice2D(g, 0, 0, w, h, s, fine, mainPad(), SL_FS, ib);
       if (I) { g.clearRect(I.x, I.y, I.w, I.h); drawTiles(R, cam, g, I.x, I.y, I.w, I.h, bgs); framed(I); }
     } else {
       drawTiles(R, cam, g, 0, 0, w, h, bgs);
@@ -2352,7 +2362,8 @@ function sliceLevels(st) {
   else for (let i = 1; i <= 8; i++) out.push(st.lo + (st.hi - st.lo) * i / 9);
   return out;
 }
-/** Atoms within SL_NEAR of the plane, as { s, r (fractions of U, V), rad (A), el, color, w (closeness 0..1) }. */
+/** Atoms within SL_NEAR of the plane, as { s, r (fractions of U, V), rad (A: a quarter of the covalent radius, small
+ *  enough to leave the density around the nucleus visible), el, color, w (closeness 0..1) }. */
 function sliceAtoms(P) {
   const out = [], U2 = dot(P.U, P.U), V2 = dot(P.V, P.V);
   for (const a of disp.atoms) {
@@ -2360,7 +2371,7 @@ function sliceAtoms(P) {
     if (Math.abs(dist) > SL_NEAR) continue;
     const q = [p[0] - P.o[0], p[1] - P.o[1], p[2] - P.o[2]], s = dot(q, P.U) / U2, r = dot(q, P.V) / V2;
     if (s < -0.02 || s > 1.02 || r < -0.02 || r > 1.02) continue;
-    out.push({ s, r, rad: 0.42 * rcov(a.el), el: a.el, color: a.color || elColor(a.el), w: 1 - Math.abs(dist) / SL_NEAR });
+    out.push({ s, r, rad: 0.25 * rcov(a.el), el: a.el, color: a.color || elColor(a.el), w: 1 - Math.abs(dist) / SL_NEAR });
   }
   return out;
 }
@@ -2371,26 +2382,32 @@ const figInk = () => (PH.on && PH.bg !== "scene" ? "#15171b" : css("--ink") || "
 /** Background of slice figures: the live view's colour (CSS rgb), or null for a transparent photo when exporting. */
 const figBg = (exporting = false) => (exporting && PH.bg === "clear" ? null : `rgb(${liveBg().map(v => Math.round(255 * v)).join(",")})`);
 const figFont = () => css("--sans") || "system-ui, sans-serif";
-/** Padding of the 2D main view, CSS px [top, right, bottom, left]: clear of the title, the slice bar, the player
- *  and the panel when they show; in Photo Mode the same on all sides. */
+/** Padding of the 2D main view, CSS px [top, right, bottom, left], the same above and below and left and right so
+ *  that the figure is centred in the window (the panel may cover its right, as it covers the 3D view): clear of the
+ *  slice bar and the player below; in Photo Mode the same on all sides. */
 function mainPad() {
   const W = window.innerWidth, H = window.innerHeight;
   if (PH.on) { const p = Math.max(24, Math.round(0.05 * Math.min(W, H))); return [p, p, p, p]; }
-  const p = [64, 28, 76 + (document.body.classList.contains("has-player") ? 48 : 0), 28], d = $("dock");
-  if (d && !d.hidden && !d.classList.contains("tucked")) {
-    const r = d.getBoundingClientRect();
-    if (r.width && r.left > W / 2) p[1] = Math.max(p[1], W - r.left + 16);
-    else if (r.height && r.top > H / 2) p[2] = Math.max(p[2], H - r.top + 12);
-  }
-  return p;
+  const v = 76 + (document.body.classList.contains("has-player") ? 48 : 0);
+  return [v, 28, v, 28];
+}
+/** CSS px kept free at the right of the view by the panel, when it shows there (at least 24). */
+function dockRight() {
+  const d = $("dock"), W = window.innerWidth;
+  if (!d || d.hidden || d.classList.contains("tucked")) return 24;
+  const r = d.getBoundingClientRect();
+  return r.width && r.left > W / 2 ? Math.max(24, W - r.left + 16) : 24;
 }
 /** Draws the 2D figure (and its colour bar when SV.bar) of slice g into the box (x, y, w, h) of context ctx.
- *  k: pixels per CSS px; pad: CSS px [top, right, bottom, left]; fs: text size in CSS px. */
-function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs) {
+ *  k: pixels per CSS px; pad: CSS px [top, right, bottom, left]; fs: text size in CSS px. avoid: for the main view,
+ *  the inset's box in CSS px (or null): the figure is centred in the box and kept clear of it (layoutClear);
+ *  without avoid (the inset itself) the figure and bar are centred as a pair. */
+function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs, avoid) {
   const P = g.plane, st = SL.style, F = fs * k, font = figFont(), ink = figInk(), bt = barTicks(st.mode, st.lo, st.hi);
   let title = barTitle();
-  const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0;
-  const Lo = figureLayout(w, h, P.width / P.height, pad.map(p => p * k), bw, 6 * F);
+  const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0, a = P.width / P.height, pk = pad.map(p => p * k);
+  const Lo = avoid === undefined ? figureLayout(w, h, a, pk, bw, 6 * F)
+    : layoutClear(w, h, a, pk, bw, 6 * F, avoid && { x: avoid.x * k, y: avoid.y * k, w: avoid.w * k, h: avoid.h * k }, 16 * k);
   drawFigure(ctx, x + Lo.x, y + Lo.y, Lo.w, Lo.h, { image: g.canvas, values: g.values, iw: g.W, ih: g.H, poly: P.poly, levels: sliceLevels(st),
     lines: SL.iso, atoms: SL.atoms ? sliceAtoms(P) : [], width: P.width, k });
   if (!SV.bar) return;
@@ -2411,7 +2428,7 @@ function drawBarAlone(ctx, W, H, k, right) {
   drawColorBar(ctx, W - right * k - bw, (H - bh) / 2, bh, { fs: F, font, ink: figInk(), bt, map: st.map, title, k });
 }
 /** Right margin (CSS px) of the colour bar alone: clear of the panel on screen, 24 px in Photo Mode. */
-function barRight() { const p = mainPad(); return PH.on ? 24 : Math.max(24, p[1]); }
+function barRight() { return PH.on ? 24 : dockRight(); }
 /** Redraws the 2D main view (or the colour bar over the 3D view) and the 2D inset, at device resolution. */
 function drawSliceViews() {
   const mode = slMode(), g = SL.img, d = Math.min(window.devicePixelRatio || 1, 3);
@@ -2422,7 +2439,7 @@ function drawSliceViews() {
     const ctx = cv.getContext("2d");
     if (ctx) {
       ctx.clearRect(0, 0, cv.width, cv.height);
-      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS); }
+      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS, SV.inset ? insetBox() : null); }
       else if (g && SL.style && mode === "3d") drawBarAlone(ctx, cv.width, cv.height, d, barRight());
     }
   }
@@ -2488,8 +2505,13 @@ async function sliceSVG() {
     for (let i = 0; i < seg.length; i += 4) d += `M${X(seg[i] / g.W)} ${Y(seg[i + 1] / g.H)}L${X(seg[i + 2] / g.W)} ${Y(seg[i + 3] / g.H)}`;
     if (d) parts.push(`<path d="${d}" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8" stroke-linecap="round"${c < 0 ? ' stroke-dasharray="4 3"' : ""}/>`);
   }
-  parts.push(`<polygon points="${P.poly.map(([s, r]) => `${X(s)},${Y(r)}`).join(" ")}" fill="none" stroke="#000" stroke-opacity="0.45"/>`);
-  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${a.color}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
+  const poly = P.poly.map(([s, r]) => `${X(s)},${Y(r)}`).join(" ");
+  if (SL.atoms) {
+    parts.push(`<clipPath id="sec"><polygon points="${poly}"/></clipPath><g clip-path="url(#sec)">`);
+    for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${a.color}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
+    parts.push("</g>");
+  }
+  parts.push(`<polygon points="${poly}" fill="none" stroke="#000" stroke-opacity="0.45"/>`);
   const t = lut(st.map), stops = [];
   for (let i = 0; i <= 32; i++) { const k = Math.round(255 * i / 32); stops.push(`<stop offset="${(i / 32).toFixed(4)}" stop-color="rgb(${t[3 * k]},${t[3 * k + 1]},${t[3 * k + 2]})"/>`); }
   parts.push(`<defs><linearGradient id="cb" x1="0" y1="1" x2="0" y2="0">${stops.join("")}</linearGradient></defs>`,
@@ -2533,7 +2555,7 @@ function moveInset(e) {
   e.preventDefault();
   const b0 = insetBox(), x0 = e.clientX, y0 = e.clientY, el = e.currentTarget;
   if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
-  const move = ev => { SV.pos = [b0.x + ev.clientX - x0, window.innerHeight - (b0.y + ev.clientY - y0) - b0.h]; placeInset(); };
+  const move = ev => { SV.pos = [b0.x + ev.clientX - x0, window.innerHeight - (b0.y + ev.clientY - y0) - b0.h]; placeInset(); if (slMode() === "2d") drawSliceViews(); };
   const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); const b = insetBox(); SV.pos = [b.x, window.innerHeight - b.y - b.h]; saveSV(); };
   el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
 }

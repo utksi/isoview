@@ -69,7 +69,8 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   and a colour bar with ticks and the field's unit: densities on a log scale over three decades, signed fields
   (orbitals, magnetization) blue to red about zero, potentials and ELF linear (scale and colours can be changed in
   the panel). It is sampled with tricubic interpolation of the (already Fourier-refined) grid, at four pixels per
-  grid step or finer when it is drawn large. Photo Mode saves the views as shown; the panel also saves the 2D slice
+  grid step or finer when it is drawn large. The sample "Si bond charge, 2D slice" opens the (110) plane through the
+  Si-Si bond chains this way. Photo Mode saves the views as shown; the panel also saves the 2D slice
   as SVG (image, vector contour lines, atoms and colour bar).
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
