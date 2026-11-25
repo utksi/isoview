@@ -247,7 +247,7 @@ body.photo .sli-x { display: none; }
 .slinset.pane { border: 0; border-radius: 0; box-shadow: none; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .slinset.pane .sli-x, .slinset.pane .sli-move, .slinset.pane .sli-grip { display: none; }
 /* the colour bar's drag handle, over the bar drawn on #slv */
-.barh { position: fixed; z-index: 2; cursor: move; touch-action: none; border-radius: 4px; }
+.barh { position: fixed; z-index: 3; cursor: move; touch-action: none; border-radius: 4px; }
 .barh:hover { outline: 1px dashed var(--accent); outline-offset: 3px; }
 /* the element key in the view's corner: a swatch per element, a click changes its colour */
 .bl-txt { display: grid; gap: 2px; min-width: 0; }
@@ -560,7 +560,9 @@ body.has-player #toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 /* photo mode: only the view and the photo bar */
 body.photo .tl, body.photo .dock, body.photo .br, body.photo .bl, body.photo .player, body.photo .pill, body.photo .slicebar, body.photo .anwin,
 body.photo .corner-eye, body.photo #ov, body.photo .use-pop, body.photo #labelbar { display: none !important; }
-body.photo .bzi-x, body.photo .bzi-grip { display: none; }
+/* Photo Mode: the crystal inset still moves and resizes (handles are not in the image); only closing it is left out */
+body.photo .bzi-x { display: none; }
+.bzinset:hover .sli-move { opacity: 1; }
 .photobar { position: fixed; z-index: 6; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; padding: 6px 8px 6px 14px; border-radius: 12px;
   font-size: 12px; color: var(--ink2); max-width: calc(100vw - 24px); }
