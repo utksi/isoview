@@ -26,8 +26,16 @@
  * the two saddle cases are split by the mean of the four corners. Segments in pixel units (x right, y along V).
  * Colour maps: viridis (polynomial fit of the matplotlib map, as published by M. Zucker, 2019, under CC0) and
  * ColorBrewer RdBu (11 classes, reversed: negative blue, positive red), linear in between, and grey.
+ *
+ * Figures (barTicks, figureLayout, drawFigure, drawColorBar): the slice image drawn into a rectangle of the same
+ * aspect as the cross-section (width / height in A), with contour lines, the cross-section outline and atoms, and a
+ * colour bar beside it. Colour-bar ticks: linear scale, the "nice" steps 1, 2, 5 x 10^p over [lo, hi]; signed scale,
+ * the same over [-m, m], m = max(|lo|, |hi|); log scale, the decades 10^k in [lo, hi] (every second one when there
+ * are more than six). A tick at value v sits at the fraction x = sc(v) of the bar from its bottom (sc as scaler()).
+ * Linear labels whose largest magnitude has exponent e <= -3 or e >= 4 are written as v / 10^e with "x10^e" once
+ * above the bar.
  */
-import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=32";
+import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=33";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -196,6 +204,139 @@ export function scaler(mode, lo, hi) {
   if (mode === "log") { const a = Math.log10(lo), b = Math.log10(hi); return v => (v <= lo ? 0 : (Math.log10(v) - a) / (b - a)); }
   if (mode === "signed") { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; return v => 0.5 + 0.5 * v / m; }
   return v => (v - lo) / ((hi - lo) || 1);
+}
+
+const SUP = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+/** "10" with exponent k in superscript digits, e.g. 10⁻³. */
+const pow10 = k => "10" + String(k).replace(/[-\d]/g, c => SUP[c]);
+
+/**
+ * Colour-bar ticks for scale mode ("lin", "signed" or "log") over [lo, hi] (see the file header). Returns
+ * { ticks: [{ v (value), x (fraction of the bar from the bottom, 0..1), text }], mult ("" or "×10ᵉ", the factor the
+ * linear labels are divided by) }. Labels use the true minus sign.
+ */
+export function barTicks(mode, lo, hi) {
+  const out = [];
+  if (mode === "log") {
+    const a = Math.log10(lo), b = Math.log10(hi), k0 = Math.ceil(a - 1e-9), k1 = Math.floor(b + 1e-9), by = k1 - k0 + 1 > 6 ? 2 : 1;
+    for (let k = k0; k <= k1; k += by) out.push({ v: 10 ** k, x: (k - a) / ((b - a) || 1), text: pow10(k) });
+    return { ticks: out, mult: "" };
+  }
+  const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1, a = mode === "signed" ? -m : lo, b = mode === "signed" ? m : hi;
+  const t = niceSteps(a, b, mode === "signed" ? 4 : 5), tol = 1e-9 * ((b - a) || 1);
+  const big = Math.max(...t.ticks.map(Math.abs)), e = big > 0 ? Math.floor(Math.log10(big) + 1e-12) : 0, scale = e <= -3 || e >= 4 ? 10 ** e : 1;
+  const dec = Math.max(0, -Math.floor(Math.log10(t.step / scale) + 1e-9));
+  for (const v of t.ticks) {
+    if (v < a - tol || v > b + tol) continue;
+    out.push({ v, x: (v - a) / ((b - a) || 1), text: (v / scale).toFixed(dec).replace("-", "−") });
+  }
+  return { ticks: out, mult: scale === 1 ? "" : "×" + pow10(e) };
+}
+/** Ticks at the steps 1, 2, 5 x 10^p, about n of them, covering [a, b]: { step, ticks }. */
+function niceSteps(a, b, n) {
+  if (!(b > a)) { const d = Math.abs(a) * 0.02 || 1; a -= d; b += d; }
+  const raw = (b - a) / n, p = 10 ** Math.floor(Math.log10(raw)), q = raw / p, step = (q < 1.5 ? 1 : q < 3.5 ? 2 : q < 7.5 ? 5 : 10) * p, ticks = [];
+  for (let v = Math.ceil(a / step - 1e-9) * step; v <= b + step * 1e-9; v += step) ticks.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  return { step, ticks };
+}
+
+/**
+ * Where the figure and its colour bar go in a W x H box (any pixel unit): the figure (aspect = width / height) as
+ * large as fits inside the padding pad = [top, right, bottom, left] next to a bar block of width barW (0: no bar),
+ * the pair centred. The bar is 80% of the figure height (at least minBar, at most the room inside the padding),
+ * centred on the figure. Returns { x, y, w, h (the figure), bx, by, bh (bar block left, top, height) }.
+ */
+export function figureLayout(W, H, aspect, pad, barW = 0, minBar = 0) {
+  const [t, r, b, l] = pad, aw = Math.max(1, W - l - r - barW), ah = Math.max(1, H - t - b);
+  let w = aw, h = aw / aspect;
+  if (h > ah) { h = ah; w = ah * aspect; }
+  const x = l + (W - l - r - (w + barW)) / 2, y = t + (ah - h) / 2;
+  const bh = Math.min(ah, Math.max(0.8 * h, minBar));
+  return { x, y, w, h, bx: x + w, by: y + (h - bh) / 2, bh };
+}
+
+// contour segments per image (values array) and level, so that redraws (colours, theme, resizing) reuse them
+const segCache = new WeakMap();
+function cachedContours(values, iw, ih, c) {
+  let m = segCache.get(values);
+  if (!m) { m = new Map(); segCache.set(values, m); }
+  if (!m.has(c)) m.set(c, contours(values, iw, ih, c));
+  return m.get(c);
+}
+/**
+ * Draws a slice figure into the rectangle (x, y, w, h) of 2D context ctx (pixels; w / h should equal the plane's
+ * width / height). o: { image (canvas or ImageBitmap, iw x ih, row 0 at V = 0), values (Float32Array(iw ih)), iw, ih,
+ * poly (cross-section, fractions of U and V), levels (contour values), lines, atoms ([{ s, r, rad (A), color, w }]),
+ * width (A, the plane's width), k (pixels per CSS pixel: line widths) }. Contours are white, dashed below zero; the
+ * cross-section outline is drawn on top; atoms are discs of radius rad, opacity 0.45 + 0.55 w.
+ */
+export function drawFigure(ctx, x, y, w, h, o) {
+  const k = o.k || 1, X = s => x + s * w, Y = r => y + h - r * h;
+  ctx.save();
+  ctx.translate(x, y + h); ctx.scale(w / o.iw, -h / o.ih);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(o.image, 0, 0);
+  ctx.restore();
+  ctx.save();
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  if (o.lines) for (const c of o.levels) {
+    const seg = cachedContours(o.values, o.iw, o.ih, c);
+    if (!seg.length) continue;
+    ctx.beginPath();
+    for (let i = 0; i < seg.length; i += 4) { ctx.moveTo(X(seg[i] / o.iw), Y(seg[i + 1] / o.ih)); ctx.lineTo(X(seg[i + 2] / o.iw), Y(seg[i + 3] / o.ih)); }
+    ctx.setLineDash(c < 0 ? [4 * k, 3 * k] : []);
+    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 0.8 * k; ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  o.poly.forEach(([s, r], i) => (i ? ctx.lineTo(X(s), Y(r)) : ctx.moveTo(X(s), Y(r))));
+  ctx.closePath(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = k; ctx.stroke();
+  const pa = w / o.width;
+  for (const a of o.atoms || []) {
+    ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * k, a.rad * pa), 0, 2 * Math.PI);
+    ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = a.color; ctx.fill();
+    ctx.lineWidth = k; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+/** Width of a colour-bar block (pixels) for font size fs (pixels): gap, bar, ticks, the widest label, the title. */
+export function colorBarWidth(ctx, fs, font, bt, title) {
+  ctx.save(); ctx.font = `${fs}px ${font}`;
+  const lab = Math.max(0, ...bt.ticks.map(t => ctx.measureText(t.text).width));
+  ctx.restore();
+  return fs * (1.1 + 0.85 + 0.35 + 0.3) + lab + (title ? fs * 1.9 : fs * 0.3);
+}
+
+/**
+ * Draws a colour bar block with its left edge at bx: the bar (top at by, height bh) after a gap, ticks and labels
+ * (bt = barTicks()) on its right, the multiplier above it and the title written upwards beside the labels.
+ * map: colour-map name; fs: font size (pixels); ink: text and frame colour; k: pixels per CSS pixel.
+ */
+export function drawColorBar(ctx, bx, by, bh, o) {
+  const { fs, font, ink, bt, map, title } = o, k = o.k || 1, x0 = bx + 1.1 * fs, bw = 0.85 * fs;
+  ctx.save();
+  const t = lut(map), gr = ctx.createLinearGradient(0, by + bh, 0, by);
+  for (let i = 0; i <= 32; i++) { const j = Math.round(255 * i / 32); gr.addColorStop(i / 32, `rgb(${t[3 * j]},${t[3 * j + 1]},${t[3 * j + 2]})`); }
+  ctx.fillStyle = gr; ctx.fillRect(x0, by, bw, bh);
+  ctx.strokeStyle = ink; ctx.lineWidth = 0.8 * k; ctx.globalAlpha = 0.7;
+  ctx.strokeRect(x0, by, bw, bh);
+  ctx.globalAlpha = 1; ctx.fillStyle = ink; ctx.font = `${fs}px ${font}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  let lab = 0;
+  ctx.beginPath();
+  for (const tk of bt.ticks) {
+    const y = by + bh - tk.x * bh;
+    ctx.moveTo(x0 + bw, y); ctx.lineTo(x0 + bw + 0.35 * fs, y);
+    ctx.fillText(tk.text, x0 + bw + 0.65 * fs, y);
+    lab = Math.max(lab, ctx.measureText(tk.text).width);
+  }
+  ctx.lineWidth = 0.8 * k; ctx.stroke();
+  if (bt.mult) { ctx.textBaseline = "alphabetic"; ctx.fillText(bt.mult, x0, by - 0.45 * fs); }
+  if (title) {
+    ctx.translate(x0 + bw + 0.65 * fs + lab + 1.1 * fs, by + bh / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(title, 0, 0);
+  }
+  ctx.restore();
 }
 
 /** RGBA image (Uint8ClampedArray(4 W H)) of values with map name and scale function sc; NaN pixels are transparent. */

@@ -27,9 +27,10 @@
  * The scene is kept in this browser (store.js): each item's files once, and a description (layers, edits, view,
  * camera, frame) written 0.7 s after the last change, so a reload restores it; New scene clears it (with Undo).
  * Embedded (?embed, in an iframe on a website or in a notebook): see initEmbed; nothing is kept in this browser.
- * Slice (SL): a 2D cut through the active field on the (hkl) plane at position t of its cell (supercell for periodic
- * fields), sampled in the worker (slice.js), drawn as a textured plane in the scene and in the slice window with
- * contour lines, the atoms within SL_NEAR of the plane and a colour bar; saved as PNG or SVG.
+ * Slice (SL, SV): a 2D cut through the active field on the (hkl) plane at position t of its cell (supercell for
+ * periodic fields), sampled in the worker (slice.js), moved with the slice bar; drawn as a textured plane in the scene,
+ * as the 2D main view and in a movable inset (the 2D figure beside the 3D view or the reverse) with contour lines, the
+ * atoms within SL_NEAR of the plane and a colour bar; Photo Mode saves that picture, the Surface panel an SVG.
  * Trajectory analysis (AN): RDF, MSD with diffusion coefficients, VDOS and per-frame series of the main trajectory
  * (analysis.js, run in the worker on the atoms still present), plotted by plot.js; chips switch curves (per frame:
  * quantities, one panel each) on and off; the curves shown save as CSV, or as a 3.5 in figure in SVG or PNG.
@@ -46,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=32";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=32";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=32";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=32";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=32";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=32";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=32";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=32";
-import { measureAll } from "./measure.js?v=32";
-import { GifWriter, buildPalette } from "./gif.js?v=32";
-import * as store from "./store.js?v=32";
-import { contours, scaler, paint, lut } from "./slice.js?v=32";
-import { chart, toCSV } from "./plot.js?v=32";
-import { openPicker } from "./picker.js?v=32";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=32";
-import { colormap } from "./slice.js?v=32";
-import { wignerSeitz, kpath } from "./bz.js?v=32";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=33";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=33";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=33";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=33";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=33";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=33";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=33";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=33";
+import { measureAll } from "./measure.js?v=33";
+import { GifWriter, buildPalette } from "./gif.js?v=33";
+import * as store from "./store.js?v=33";
+import { contours, scaler, paint, lut, barTicks, figureLayout, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=33";
+import { chart, toCSV } from "./plot.js?v=33";
+import { openPicker } from "./picker.js?v=33";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=33";
+import { colormap } from "./slice.js?v=33";
+import { wignerSeitz, kpath } from "./bz.js?v=33";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -86,6 +87,21 @@ const S = {
   colors: new Map(), // element -> "#rrggbb" chosen by the user (element chips)
   atomColors: new Map(), // atomKey (item id : atom id) -> "#rrggbb" for single atoms (selection bar: Colour)
 };
+// slice state (see the section "2D slices")
+const SL_NEAR = 0.8; // A: atoms closer than this to the plane are drawn on the slice
+const SL = { on: false, hkl: [0, 0, 1], t: 0.5, scale: "auto", map: "auto", iso: true, atoms: true, in3d: true, img: null, style: null, key: "", busy: false, again: null, fine: null };
+// view: main "3d" or "2d", inset and colour bar on or off, inset size (CSS px, its longer side) and position
+// ([left, bottom] CSS px, null: the default corner); the last three are kept in this browser
+const SV = { main: "3d", inset: true, bar: true, size: 240, pos: null };
+try {
+  const v = JSON.parse(localStorage.getItem("isoview-slice") || "{}");
+  if (typeof v.inset === "boolean") SV.inset = v.inset;
+  if (typeof v.bar === "boolean") SV.bar = v.bar;
+  if (v.size >= 120) SV.size = v.size;
+  if (Array.isArray(v.pos) && v.pos.every(Number.isFinite)) SV.pos = v.pos;
+} catch (e) { /* storage unavailable */ }
+const saveSV = () => { try { localStorage.setItem("isoview-slice", JSON.stringify({ inset: SV.inset, bar: SV.bar, size: SV.size, pos: SV.pos })); } catch (e) { /* storage unavailable */ } };
+const SL_FS = 12, SL_FS_INSET = 10; // CSS px: colour-bar text in the main view and in the inset
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
 const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
@@ -145,7 +161,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=32", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=33", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -176,13 +192,18 @@ async function fallbackToWebGL2(msg) {
   buildStructure(); refreshSurfaces();
   toast(`WebGPU reported an error (${msg}); switched to WebGL2.`, true, 9000);
 }
+/** Sizes the 3D canvas for its box (the window, or the slice inset while the 2D slice is the main view). */
 function resize() {
-  const w = window.innerWidth, h = window.innerHeight, d0 = window.devicePixelRatio || 1;
+  const inset = canvas.parentElement && canvas.parentElement.id === "sli", b = inset ? insetBox() : null;
+  const w = inset ? b.w : window.innerWidth, h = inset ? b.h : window.innerHeight, d0 = window.devicePixelRatio || 1;
   // WHY: in photo mode the view is drawn at twice the device pixels and shown scaled down (supersampled: sphere
   // impostors discard whole pixels, so multisampling alone leaves their edges stepped), within the renderer's
   // largest side and PH_LIVE pixels
   const dpr = PH.on ? Math.min(2 * d0, 4, ((R && R.maxSide) || 4096) / Math.max(w, h), Math.sqrt(PH_LIVE / (w * h))) : Math.min(d0, 2);
-  canvas.width = Math.max(1, Math.round(w * dpr)); canvas.height = Math.max(1, Math.round(h * dpr));
+  // WHY: set only on a change, since assigning the size (even the same) reallocates the drawing buffer
+  const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
+  if (canvas.width !== cw) canvas.width = cw;
+  if (canvas.height !== ch) canvas.height = ch;
   cam.w = w; cam.h = h;
   requestRender();
 }
@@ -200,7 +221,7 @@ function uniformsFor(c, r, w, h, bg = pal.bg, dpr = w / c.w, tile = null) {
 function frame() {
   dirty = false;
   if (!R) return;
-  R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
+  if (view3dShown()) R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
   if (S.bz && BZI.R && !$("bzinset").hidden) drawInset();
   drawOverlay(); drawTriad();
 }
@@ -300,7 +321,7 @@ function recolor() {
   for (const b of shownBonds) { b.c0 = b.a.color; b.c1 = b.b.color; }
   uploadAtoms(); uploadLabels();
   R.setBonds(packBonds(shownBonds), shownBonds.length);
-  if (SL.on) drawSliceWindow();
+  if (SL.on) drawSliceViews();
   requestRender(); saveSoon();
 }
 /** One chip per element of the atoms layers on show: a checkbox (unticked = not drawn) and the element with its colour
@@ -1225,6 +1246,7 @@ function clearScene() {
   if (!$("tol-keep").checked) { S.tol = TOL0; $("tol").value = TOL0; $("tol-out").textContent = TOL0.toFixed(2); }
   if (R) R.clearMeshes();
   setLabelMode(false); setBoxMode(false);
+  if (SL.on) setSliceOn(false);
 }
 function sameAtoms(a, b) {
   if (!a || !b || a.species.length !== b.species.length || !sameCell(a.lattice, b.lattice)) return false;
@@ -1493,7 +1515,7 @@ async function example(id) {
   } catch (e) { toast(e.message || String(e), true); }
   finally { busy(false); }
 }
-function restyle() { if (!R) return; readPalette(); R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg()); requestRender(); }
+function restyle() { if (!R) return; readPalette(); R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg()); if (SL.on) drawSliceViews(); requestRender(); }
 
 /* ------------------------------------------------------------------ corner eyes: tuck away the group in each corner */
 const CORNERS = { tl: "tl", tr: "dock", bl: "bl", br: "br" };
@@ -1502,6 +1524,7 @@ const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><g class="open"><g clas
   '<g class="shut" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.4 10.6c2.4 2.9 5.3 4.4 8.6 4.4s6.2-1.5 8.6-4.4"/><path d="m6.3 13.4-1.4 1.9M12 15v2.3M17.7 13.4l1.4 1.9"/></g></svg>';
 function tuck(c, on) {
   $(CORNERS[c]).classList.toggle("tucked", on);
+  if (SL.on) drawSliceViews(); // the 2D view keeps clear of the panel
   const b = document.querySelector(`.corner-eye[data-corner="${c}"]`), t = `${on ? "Show" : "Hide"} ${CORNER_NAMES[c]} (H for all)`;
   b.setAttribute("aria-pressed", String(on)); b.title = t; b.setAttribute("aria-label", t);
 }
@@ -2028,7 +2051,8 @@ window.addEventListener("resize", () => { if (S.bz && BZI.R && !$("bzinset").hid
 // with an off-centre projection (uniformsFor tile), at PH_SS times the output size and averaged down, so sphere and
 // bond edges are smooth and the GPU holds one tile at a time. A transparent background comes from two renders, on
 // black (C_0 = a F) and on white (C_1 = a F + (1 - a)): a = 1 - mean over r, g, b of (C_1 - C_0), F = C_0 / a.
-// In the Brillouin-zone view the crystal inset goes into the image where it shows.
+// In the Brillouin-zone view the crystal inset goes into the image where it shows; with a slice, the 2D view, the inset
+// and the colour bar as they show (renderPhoto).
 const PH = { on: false, size: "2", bg: "scene" };
 const PH_SS = 2, PH_TILE = 2048, PH_MAXPX = 16e6, PH_LIVE = 6e6; // PH_MAXPX: the largest 2D canvas Safari allows (2^24 px)
 try { const v = JSON.parse(localStorage.getItem("isoview-photo") || "{}"); if (["screen", "2", "4"].includes(v.size)) PH.size = v.size; if (["scene", "white", "clear"].includes(v.bg)) PH.bg = v.bg; } catch (e) { /* storage unavailable */ }
@@ -2036,8 +2060,8 @@ try { const v = JSON.parse(localStorage.getItem("isoview-photo") || "{}"); if ([
 function liveBg() { return PH.on && PH.bg === "white" ? [1, 1, 1] : pal.bg; }
 /** Output size: the window (CSS px) times the chosen scale (Screen: the device pixel ratio), at most PH_MAXPX px. */
 function photoSize() {
-  const k0 = PH.size === "screen" ? (window.devicePixelRatio || 1) : +PH.size, k = Math.min(k0, Math.sqrt(PH_MAXPX / (cam.w * cam.h)));
-  return { w: Math.round(cam.w * k), h: Math.round(cam.h * k) };
+  const vw = window.innerWidth, vh = window.innerHeight, k0 = PH.size === "screen" ? (window.devicePixelRatio || 1) : +PH.size, k = Math.min(k0, Math.sqrt(PH_MAXPX / (vw * vh)));
+  return { w: Math.round(vw * k), h: Math.round(vh * k) };
 }
 function setPhoto(on) {
   if (on === !!PH.on || (on && (!R || !S.layers.length))) return;
@@ -2048,6 +2072,7 @@ function setPhoto(on) {
   if (!S.bz && disp.atoms.length) uploadAtoms();
   R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg());
   resize(); if (S.bz && BZI.R) sizeInset();
+  if (SL.on) applySliceView(); // the 2D view's margins and the inset's handles change
 }
 function photoUI() {
   for (const b of $("ph-size").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === PH.size));
@@ -2084,19 +2109,36 @@ function drawTiles(r, c, g, dx, dy, ow, oh, bgs) {
   }
   r.setBackground(liveBg());
 }
-/** The photo as a canvas, at photoSize(); the live view is restored afterwards. */
-function renderPhoto() {
-  const { w, h } = photoSize(), out = document.createElement("canvas");
+/** The photo as a canvas, at photoSize(); the live view is restored afterwards. With a slice: the main view (3D, or
+ *  the 2D figure), the inset (the other view) and the colour bar as on screen, the slice sampled again for the output
+ *  size (sliceFine). The inset is drawn over a cleared box (transparent for a transparent photo) with a thin frame. */
+async function renderPhoto() {
+  const vw = window.innerWidth, { w, h } = photoSize(), s = w / vw, mode = slMode(), out = document.createElement("canvas");
   out.width = w; out.height = h;
   const g = out.getContext("2d"), bgs = PH.bg === "clear" ? [[0, 0, 0], [1, 1, 1]] : [PH.bg === "white" ? [1, 1, 1] : pal.bg];
   g.imageSmoothingQuality = "high";
+  const ib = mode !== "off" && SV.inset ? insetBox() : null, I = ib && { x: Math.round(ib.x * s), y: Math.round(ib.y * s), w: Math.round(ib.w * s), h: Math.round(ib.h * s) };
+  const fine = !SL.style ? null : mode === "2d" ? await sliceFine(0.9 * Math.max(w, h)) : mode === "3d" && I ? await sliceFine(Math.max(I.w, I.h)) : null;
+  const framed = r => { g.strokeStyle = css("--line2") || "#c8ccd2"; g.lineWidth = Math.max(1, s); g.strokeRect(r.x + g.lineWidth / 2, r.y + g.lineWidth / 2, r.w - g.lineWidth, r.h - g.lineWidth); };
+  const bg = figBg(true);
   try {
-    drawTiles(R, cam, g, 0, 0, w, h, bgs);
-    if (S.bz && BZI.R && !$("bzinset").hidden) {
-      const b = $("bzinset").getBoundingClientRect(), s = w / cam.w, x = Math.round(b.left * s), y = Math.round(b.top * s), side = Math.round(b.width * s);
-      BZI.cam.q = cam.q.slice(); BZI.cam.ortho = cam.ortho;
-      drawTiles(BZI.R, BZI.cam, g, x, y, side, side, bgs);
-      g.strokeStyle = css("--line2") || "#c8ccd2"; g.lineWidth = Math.max(1, s); g.strokeRect(x + g.lineWidth / 2, y + g.lineWidth / 2, side - g.lineWidth, side - g.lineWidth);
+    if (mode === "2d") {
+      if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
+      if (fine) drawSlice2D(g, 0, 0, w, h, s, fine, mainPad(), SL_FS);
+      if (I) { g.clearRect(I.x, I.y, I.w, I.h); drawTiles(R, cam, g, I.x, I.y, I.w, I.h, bgs); framed(I); }
+    } else {
+      drawTiles(R, cam, g, 0, 0, w, h, bgs);
+      if (I && fine) {
+        g.clearRect(I.x, I.y, I.w, I.h);
+        if (bg) { g.fillStyle = bg; g.fillRect(I.x, I.y, I.w, I.h); }
+        drawSlice2D(g, I.x, I.y, I.w, I.h, s, fine, [8, 8, 8, 8], SL_FS_INSET); framed(I);
+      } else if (mode === "3d" && SV.bar && SL.in3d && SL.style) drawBarAlone(g, w, h, s, barRight());
+      if (S.bz && BZI.R && !$("bzinset").hidden) {
+        const b = $("bzinset").getBoundingClientRect(), x = Math.round(b.left * s), y = Math.round(b.top * s), side = Math.round(b.width * s);
+        BZI.cam.q = cam.q.slice(); BZI.cam.ortho = cam.ortho;
+        drawTiles(BZI.R, BZI.cam, g, x, y, side, side, bgs);
+        framed({ x, y, w: side, h: side });
+      }
     }
   } finally {
     resize(); if (S.bz && BZI.R) sizeInset();
@@ -2105,19 +2147,19 @@ function renderPhoto() {
   return out;
 }
 const photoName = () => ($("doc-name").textContent.split(" + ")[0] || "isoview").replace(/[^\w.-]+/g, "_") + ".png";
+/** Renders the photo and saves it as PNG. Returns a promise (settled when the file is handed to the browser). */
 function savePhoto() {
-  if (!PH.on || !R) return;
-  let out;
-  try { out = renderPhoto(); } catch (e) { toast("Could not draw the image: " + (e.message || e), true); return; }
-  out.toBlob(b => (b ? download(b, photoName()) : toast("Could not encode the image (too large for this browser?).", true)), "image/png");
+  if (!PH.on || !R) return Promise.resolve();
+  busy(true);
+  return renderPhoto().then(out => new Promise(res => out.toBlob(b => { if (b) download(b, photoName()); else toast("Could not encode the image (too large for this browser?).", true); res(); }, "image/png")))
+    .catch(e => toast("Could not draw the image: " + (e.message || e), true)).finally(() => busy(false));
 }
 function copyPhoto() {
   if (!PH.on || !R) return;
   if (!navigator.clipboard || !window.ClipboardItem) { toast("This browser cannot copy images; use Save PNG.", true); return; }
-  let out;
-  try { out = renderPhoto(); } catch (e) { toast("Could not draw the image: " + (e.message || e), true); return; }
   // WHY: the blob is handed over as a promise so the copy still counts as part of the click
-  navigator.clipboard.write([new ClipboardItem({ "image/png": new Promise(res => out.toBlob(res, "image/png")) })])
+  const blob = renderPhoto().then(out => new Promise((res, rej) => out.toBlob(b => (b ? res(b) : rej(new Error("the image could not be encoded"))), "image/png")));
+  navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     .then(() => toast("Copied the image."), e => toast("Could not copy: " + (e.message || e), true));
 }
 const savePhotoPrefs = () => { try { localStorage.setItem("isoview-photo", JSON.stringify({ size: PH.size, bg: PH.bg })); } catch (e) { /* storage unavailable */ } };
@@ -2131,25 +2173,97 @@ $("ph-bg").addEventListener("click", e => {
   if (!b) return;
   PH.bg = b.value; photoUI(); savePhotoPrefs();
   R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg());
+  if (SL.on) drawSliceViews();
   requestRender();
 });
 window.addEventListener("resize", () => { if (PH.on) photoUI(); });
 
 /* ------------------------------------------------------------------ 2D slices */
-const SL_NEAR = 0.8; // A: atoms closer than this to the plane are drawn on the slice
-const SL = { on: false, hkl: [0, 0, 1], t: 0.5, scale: "auto", map: "auto", iso: true, atoms: true, in3d: true, img: null, key: "", busy: false, again: null };
+// The slice (SL) is a 2D cut through the active field on the (hkl) plane at position t of its cell (supercell for
+// periodic fields), sampled in the worker (slice.js: tricubic, at least 4 pixels per grid step and finer when it is
+// drawn large). It shows as a coloured plane in the 3D scene, as the main view (2D: #slv, the figure fitted to the
+// window) and in the inset (#sli, movable and resizable): SV.main picks the main view and the inset shows the other
+// one (the 2D figure beside the 3D view, or the 3D view beside the 2D figure: the renderer's canvas moves into the
+// inset box). The colour bar goes with the 2D figure, in the main view or the inset; with the 3D view alone it stands
+// at the right of the view. Photo Mode draws the same picture at the output size, the slice sampled again so that one
+// image pixel is at most 2 output pixels.
+// (the slice state SL, SV is declared with the other state, near the top)
+
 /** The field layer the slice is taken from (the active one, else the first visible one) with its item and field. */
 function sliceTarget() {
   const L = activeField() || fieldLayers(true)[0], it = L && itemOf(L), f = it && it.fields[L.fi];
   return f ? { L, it, f } : null;
 }
-/** Re-slices when anything the slice depends on changed (layer, field, shift, supercell, plane, position). */
+/** "off" (no slice shown), or the main view: "3d" or "2d". */
+const slMode = () => (SL.on && !S.bz && sliceTarget() ? SV.main : "off");
+/** The inset box in CSS px { x (left), y (top), w, h }: square around the 3D view; around the 2D figure, the plane's
+ *  aspect (clamped to 1:3 .. 3:1) with room for the colour bar. Its longer side is SV.size (at most 60% of the window
+ *  width and 70% of its height); it stays inside the window. */
+function insetBox() {
+  const W = window.innerWidth, H = window.innerHeight, side = Math.max(120, Math.min(SV.size, W * 0.6, H * 0.7));
+  let w = side, h = side;
+  if (SV.main === "3d" && SL.img) {
+    const a = Math.min(3, Math.max(1 / 3, SL.img.plane.width / SL.img.plane.height));
+    if (a >= 1) h = side / a; else w = side * a;
+    w += 16; h += 16; // the padding around the figure
+    if (SV.bar) w += 5.2 * SL_FS_INSET + 30; // the bar, its labels and title
+  }
+  w = Math.round(Math.min(w, W - 8)); h = Math.round(Math.min(h, H - 8));
+  const narrow = W <= 1100, bars = (document.body.classList.contains("has-player") ? 48 : 0) + 48;
+  const [l, b] = SV.pos || [46, narrow ? 96 + bars : 96];
+  const x = Math.min(Math.max(4, l), W - w - 4), y = Math.min(Math.max(4, H - b - h), H - h - 4);
+  return { x, y, w, h };
+}
+/** Puts the inset box where insetBox() says. */
+function placeInset() {
+  const b = insetBox(), box = $("sli");
+  box.style.left = b.x + "px"; box.style.bottom = (window.innerHeight - b.y - b.h) + "px";
+  box.style.setProperty("--sliw", b.w + "px"); box.style.setProperty("--slih", b.h + "px");
+  return b;
+}
+/** Shows the slice bar, the 2D view, the inset (with the 2D figure, or the renderer's canvas moved into it) and the
+ *  options for the current mode, then sizes and redraws everything. */
+function applySliceView() {
+  const mode = slMode(), on = mode !== "off", box = $("sli");
+  document.body.classList.toggle("has-slicebar", on);
+  document.body.classList.toggle("sl-2d", mode === "2d");
+  $("slicebar").hidden = !on;
+  $("sl-panel").hidden = !SL.on;
+  $("ph-sl").hidden = !on;
+  box.hidden = !(on && SV.inset);
+  box.classList.toggle("d3", mode === "2d");
+  // the 3D view lives in the inset while the 2D slice is the main view
+  const home = mode === "2d" ? box : $("stage");
+  if (canvas && canvas.parentElement !== home) home.prepend(canvas);
+  $("sli-cv").hidden = mode === "2d";
+  $("slv").hidden = !(mode === "2d" || (mode === "3d" && SV.bar && !SV.inset && SL.in3d));
+  if (!box.hidden) placeInset();
+  segSlice();
+  resize();
+  drawSliceViews();
+}
+/** True while the 3D view is on screen (it is hidden when the 2D slice fills the window without the inset). */
+const view3dShown = () => !(slMode() === "2d" && !SV.inset);
+/** Re-slices when anything the slice depends on changed (layer, field, shift, supercell, plane, position, the size
+ *  it is drawn at). */
 function syncSlice() {
   const T = sliceTarget();
-  $("slicewin").hidden = !SL.on || !T;
-  if (!SL.on || !T || S.bz) { SL.key = ""; if (R && R.setSlice) { R.setSlice(null); } if (S.bz) $("slicewin").hidden = true; return; }
-  const k = [T.L.id, T.L.fi, T.f.name, T.f.n.join(), T.it.ds, S.t.join(), S.reps.join(), SL.hkl.join(), SL.t].join("|");
+  if (!SL.on || !T || S.bz) {
+    SL.key = "";
+    if (R && R.setSlice) R.setSlice(null);
+    applySliceView();
+    return;
+  }
+  const k = [T.L.id, T.L.fi, T.f.name, T.f.n.join(), T.it.ds, S.t.join(), S.reps.join(), SL.hkl.join(), SL.t, Math.ceil(liveFit() / 256)].join("|");
   if (k !== SL.key) { SL.key = k; requestSlice(false); }
+  applySliceView();
+}
+/** Pixels wanted along the longer side of the slice image for the 2D figure on screen: half its device pixels. */
+function liveFit() {
+  const mode = slMode(), d = Math.min(window.devicePixelRatio || 1, 3);
+  if (mode === "2d") return Math.round(0.85 * Math.max(window.innerWidth, window.innerHeight) * d / 2);
+  if (mode === "3d" && SV.inset) { const b = insetBox(); return Math.round(Math.max(b.w, b.h) * d / 2); }
+  return 0;
 }
 /** One slice request at a time; a request made meanwhile runs after it (only the latest). preview: coarse, fast. */
 function requestSlice(preview) {
@@ -2160,21 +2274,26 @@ function requestSlice(preview) {
     if (SL.again !== null) { const p = SL.again; SL.again = null; requestSlice(p); }
   });
 }
-async function sliceNow(preview) {
-  const T = sliceTarget();
-  if (!SL.on || !T) return;
-  const { L, it, f } = T, per = (f.periodic || f.closed) && pbcOf(it), reps = per ? S.reps : [1, 1, 1];
+/** The worker's slice request for the current plane: px at least 4 per grid step, fit pixels along the longer side
+ *  (0: no minimum), at most maxSide pixels on a side and maxPix in all. */
+function sliceCall(fit, maxSide, maxPix = 8e6) {
+  const { L, it, f } = sliceTarget(), per = (f.periodic || f.closed) && pbcOf(it), reps = per ? S.reps : [1, 1, 1];
   const N = f.periodic ? f.n : f.n.map(n => n - 1);
   // WHY: four pixels per grid step of the (already refined, <= 0.1 A) grid; the cubic interpolation fills between
   const step = Math.min(...f.span.map((v, a) => norm(v) / N[a]));
-  const r = await call("slice", { ds: it.ds, fi: L.fi, cell: f.span.map((v, a) => v.map(c => c * reps[a])), origin: f.origin, hkl: SL.hkl, t: SL.t,
-    px: step / 4, maxSide: preview ? 320 : 1600, shift: fracShift(f.span) });
-  SL.img = { ...r, f, signed: f.kind === "signed" };
+  return call("slice", { ds: it.ds, fi: L.fi, cell: f.span.map((v, a) => v.map(c => c * reps[a])), origin: f.origin, hkl: SL.hkl, t: SL.t,
+    px: step / 4, fit, maxSide, maxPix, shift: fracShift(f.span) }).then(r => ({ ...r, f, signed: f.kind === "signed", reps }));
+}
+async function sliceNow(preview) {
+  if (!SL.on || !sliceTarget()) return;
+  const r = await sliceCall(preview ? 0 : liveFit(), preview ? 480 : 2048);
+  if (!SL.on) return;
+  SL.img = r; SL.fine = null;
   paintSlice();
 }
 /** Scale mode and colour map in use (auto: log for densities, symmetric for signed fields, else linear). */
-function sliceStyle() {
-  const g = SL.img, kind = g.f.kind;
+function sliceStyle(g = SL.img) {
+  const kind = g.f.kind;
   let mode;
   if (SL.scale === "log") mode = g.max > 0 ? "log" : "lin";
   else if (SL.scale === "lin") mode = g.signed ? "signed" : "lin";
@@ -2184,20 +2303,36 @@ function sliceStyle() {
   const lo = mode === "log" ? g.max * 1e-3 : g.min, hi = g.max;
   return { mode, map, lo, hi, sc: scaler(mode, lo, hi) };
 }
-/** Colours the slice image, hands it to the renderer and redraws the window. */
-function paintSlice() {
-  const g = SL.img;
-  if (!g) return;
-  const st = sliceStyle(), px = paint(g.values, g.W, g.H, st.map, st.sc);
+/** The coloured image of slice g in style st, as a canvas of g.W x g.H (row 0 at V = 0). */
+function colorCanvas(g, st) {
   const c = document.createElement("canvas");
   c.width = g.W; c.height = g.H;
   const x = c.getContext("2d");
-  if (x) x.putImageData(new ImageData(px, g.W, g.H), 0, 0);
-  SL.canvas = c; SL.style = st;
-  if (R && R.setSlice) R.setSlice(SL.in3d ? { o: g.plane.o, U: g.plane.U, V: g.plane.V, alpha: 0.95, image: c } : null);
+  if (x) x.putImageData(new ImageData(paint(g.values, g.W, g.H, st.map, st.sc), g.W, g.H), 0, 0);
+  return c;
+}
+/** Colours the slice image, hands it to the renderer and redraws the 2D views. */
+function paintSlice() {
+  const g = SL.img;
+  if (!g) return;
+  SL.style = sliceStyle(g);
+  g.canvas = colorCanvas(g, SL.style);
+  if (R && R.setSlice) R.setSlice(SL.in3d ? { o: g.plane.o, U: g.plane.U, V: g.plane.V, alpha: 0.95, image: g.canvas } : null);
+  $("sl-d").textContent = slicePos(g.plane);
+  $("sl-d").title = `The plane is ${(g.plane.d - g.plane.dRange[0]).toFixed(3)} Å into the cell (of ${g.plane.depth.toFixed(3)} Å) along the normal of (${SL.hkl.join(" ")})`;
+  // the inset's shape follows the plane
+  if (!$("sli").hidden) placeInset();
   requestRender();
-  drawSliceWindow();
+  drawSliceViews();
   segSlice();
+}
+/** Position text: for (100), (010), (001) the fractional coordinate in the unit cell (x, y, z; past 1 in a
+ *  supercell) and the distance into the cell; for other planes the distance only. */
+function slicePos(P) {
+  const d = `${(P.d - P.dRange[0]).toFixed(2)} Å`, a = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].findIndex(v => v.join() === SL.hkl.join());
+  if (a < 0) return d;
+  const reps = SL.img ? SL.img.reps[a] : 1;
+  return `${"xyz"[a]} ${(SL.t * reps).toFixed(3)} · ${d}`;
 }
 /** Contour levels: 8 evenly spaced in the colour scale (symmetric pairs for signed fields), as field values. */
 function sliceLevels(st) {
@@ -2207,7 +2342,7 @@ function sliceLevels(st) {
   else for (let i = 1; i <= 8; i++) out.push(st.lo + (st.hi - st.lo) * i / 9);
   return out;
 }
-/** Atoms within SL_NEAR of the plane, as { s, r (fractions of U, V), rad (A), el, w (closeness 0..1) }. */
+/** Atoms within SL_NEAR of the plane, as { s, r (fractions of U, V), rad (A), el, color, w (closeness 0..1) }. */
 function sliceAtoms(P) {
   const out = [], U2 = dot(P.U, P.U), V2 = dot(P.V, P.V);
   for (const a of disp.atoms) {
@@ -2215,117 +2350,207 @@ function sliceAtoms(P) {
     if (Math.abs(dist) > SL_NEAR) continue;
     const q = [p[0] - P.o[0], p[1] - P.o[1], p[2] - P.o[2]], s = dot(q, P.U) / U2, r = dot(q, P.V) / V2;
     if (s < -0.02 || s > 1.02 || r < -0.02 || r > 1.02) continue;
-    out.push({ s, r, rad: 0.42 * rcov(a.el), el: a.el, w: 1 - Math.abs(dist) / SL_NEAR });
+    out.push({ s, r, rad: 0.42 * rcov(a.el), el: a.el, color: a.color || elColor(a.el), w: 1 - Math.abs(dist) / SL_NEAR });
   }
   return out;
 }
-/** Draws the figure (image, contours, atoms, cross-section outline) into a 2D context of w x h pixels. */
-function drawSliceFigure(ctx, w, h, lw = 1) {
-  const g = SL.img, P = g.plane, st = SL.style, X = s => s * w, Y = r => h - r * h;
-  ctx.clearRect(0, 0, w, h);
-  ctx.save(); ctx.translate(0, h); ctx.scale(w / g.W, -h / g.H); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(SL.canvas, 0, 0); ctx.restore();
-  if (SL.iso) for (const c of sliceLevels(st)) {
-    const seg = contours(g.values, g.W, g.H, c);
-    ctx.beginPath();
-    for (let i = 0; i < seg.length; i += 4) { ctx.moveTo(X(seg[i] / g.W), Y(seg[i + 1] / g.H)); ctx.lineTo(X(seg[i + 2] / g.W), Y(seg[i + 3] / g.H)); }
-    ctx.setLineDash(c < 0 ? [4 * lw, 3 * lw] : []);
-    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 0.8 * lw; ctx.stroke();
+/** The colour bar's title: the field's name and unit. */
+const barTitle = () => { const f = SL.img && SL.img.f; return f ? `${f.name}${f.unit ? ` (${f.unit})` : ""}` : ""; };
+/** Text colour of slice figures: the theme's, or near black on a white or transparent photo (for paper). */
+const figInk = () => (PH.on && PH.bg !== "scene" ? "#15171b" : css("--ink") || "#15171b");
+/** Background of slice figures: the live view's colour (CSS rgb), or null for a transparent photo when exporting. */
+const figBg = (exporting = false) => (exporting && PH.bg === "clear" ? null : `rgb(${liveBg().map(v => Math.round(255 * v)).join(",")})`);
+const figFont = () => css("--sans") || "system-ui, sans-serif";
+/** Padding of the 2D main view, CSS px [top, right, bottom, left]: clear of the title, the slice bar, the player
+ *  and the panel when they show; in Photo Mode the same on all sides. */
+function mainPad() {
+  const W = window.innerWidth, H = window.innerHeight;
+  if (PH.on) { const p = Math.max(24, Math.round(0.05 * Math.min(W, H))); return [p, p, p, p]; }
+  const p = [64, 28, 76 + (document.body.classList.contains("has-player") ? 48 : 0), 28], d = $("dock");
+  if (d && !d.hidden && !d.classList.contains("tucked")) {
+    const r = d.getBoundingClientRect();
+    if (r.width && r.left > W / 2) p[1] = Math.max(p[1], W - r.left + 16);
+    else if (r.height && r.top > H / 2) p[2] = Math.max(p[2], H - r.top + 12);
   }
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  P.poly.forEach(([s, r], i) => (i ? ctx.lineTo(X(s), Y(r)) : ctx.moveTo(X(s), Y(r))));
-  ctx.closePath(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 1 * lw; ctx.stroke();
-  if (SL.atoms) {
-    const k = w / P.width;
-    for (const a of sliceAtoms(P)) {
-      ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * lw, a.rad * k), 0, 2 * Math.PI);
-      ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = elColor(a.el); ctx.fill();
-      ctx.lineWidth = 1 * lw; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
+  return p;
+}
+/** Draws the 2D figure (and its colour bar when SV.bar) of slice g into the box (x, y, w, h) of context ctx.
+ *  k: pixels per CSS px; pad: CSS px [top, right, bottom, left]; fs: text size in CSS px. */
+function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs) {
+  const P = g.plane, st = SL.style, F = fs * k, font = figFont(), ink = figInk(), bt = barTicks(st.mode, st.lo, st.hi);
+  let title = barTitle();
+  const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0;
+  const Lo = figureLayout(w, h, P.width / P.height, pad.map(p => p * k), bw, 6 * F);
+  drawFigure(ctx, x + Lo.x, y + Lo.y, Lo.w, Lo.h, { image: g.canvas, values: g.values, iw: g.W, ih: g.H, poly: P.poly, levels: sliceLevels(st),
+    lines: SL.iso, atoms: SL.atoms ? sliceAtoms(P) : [], width: P.width, k });
+  if (!SV.bar) return;
+  ctx.save(); ctx.font = `${F}px ${font}`;
+  if (ctx.measureText(title).width > Lo.bh) title = ""; // a title longer than the bar is left out
+  ctx.restore();
+  drawColorBar(ctx, x + Lo.bx, y + Lo.by, Lo.bh, { fs: F, font, ink, bt, map: st.map, title, k });
+}
+/** The colour bar alone at the right of a W x H view (the 3D view without the inset): 40% of the height, at most
+ *  320 CSS px, centred; right: CSS px kept free at the right. k: pixels per CSS px. */
+function drawBarAlone(ctx, W, H, k, right) {
+  const st = SL.style, F = SL_FS * k, font = figFont(), bt = barTicks(st.mode, st.lo, st.hi);
+  let title = barTitle();
+  const bw = colorBarWidth(ctx, F, font, bt, title), bh = Math.min(0.4 * H, 320 * k);
+  ctx.save(); ctx.font = `${F}px ${font}`;
+  if (ctx.measureText(title).width > bh) title = "";
+  ctx.restore();
+  drawColorBar(ctx, W - right * k - bw, (H - bh) / 2, bh, { fs: F, font, ink: figInk(), bt, map: st.map, title, k });
+}
+/** Right margin (CSS px) of the colour bar alone: clear of the panel on screen, 24 px in Photo Mode. */
+function barRight() { const p = mainPad(); return PH.on ? 24 : Math.max(24, p[1]); }
+/** Redraws the 2D main view (or the colour bar over the 3D view) and the 2D inset, at device resolution. */
+function drawSliceViews() {
+  const mode = slMode(), g = SL.img, d = Math.min(window.devicePixelRatio || 1, 3);
+  const cv = $("slv");
+  if (!cv.hidden) {
+    const W = window.innerWidth, H = window.innerHeight;
+    cv.width = Math.round(W * d); cv.height = Math.round(H * d);
+    const ctx = cv.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS); }
+      else if (g && SL.style && mode === "3d") drawBarAlone(ctx, cv.width, cv.height, d, barRight());
+    }
+  }
+  const box = $("sli"), ic = $("sli-cv");
+  if (!box.hidden && mode === "3d") {
+    const b = insetBox();
+    ic.width = Math.round(b.w * d); ic.height = Math.round(b.h * d);
+    const ctx = ic.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = figBg(); ctx.fillRect(0, 0, ic.width, ic.height);
+      if (g && SL.style) drawSlice2D(ctx, 0, 0, ic.width, ic.height, d, g, [8, 8, 8, 8], SL_FS_INSET);
     }
   }
 }
-/** Sizes the window's canvas to its box (device pixels) and draws the figure and the colour bar. */
-function drawSliceWindow() {
-  const g = SL.img, cv = $("sl-cv");
-  if (!g || $("slicewin").hidden) return;
-  const P = g.plane, dpr = window.devicePixelRatio || 1, cw = cv.clientWidth || 300;
-  const ch = Math.min(cw * P.height / P.width, (window.innerHeight || 800) * 0.6);
-  const w = Math.round(ch / (P.height / P.width) < cw ? ch * P.width / P.height : cw);
-  cv.style.height = ch + "px"; cv.width = Math.round(w * dpr); cv.height = Math.round(ch * dpr);
-  cv.style.width = w + "px";
-  const ctx = cv.getContext("2d");
-  if (ctx) drawSliceFigure(ctx, cv.width, cv.height, dpr);
-  const cb = $("sl-cb"), t = lut(SL.style.map), cx = cb.getContext("2d");
-  if (cx) { const im = cx.createImageData(1, 256); for (let i = 0; i < 256; i++) { im.data.set(t.subarray(3 * (255 - i), 3 * (255 - i) + 3), 4 * i); im.data[4 * i + 3] = 255; } cb.width = 1; cb.height = 256; cx.putImageData(im, 0, 0); }
-  const st = SL.style, u = g.f.unit ? " " + g.f.unit : "";
-  $("sl-max").textContent = fmt(st.mode === "signed" ? Math.max(Math.abs(st.lo), Math.abs(st.hi)) : st.hi);
-  $("sl-min").textContent = fmt(st.mode === "signed" ? -Math.max(Math.abs(st.lo), Math.abs(st.hi)) : st.lo);
-  $("sl-max").title = `${$("sl-max").textContent}${u}`; $("sl-min").title = `${$("sl-min").textContent}${u}`;
-  $("sl-d").textContent = `${P.d.toFixed(2)} Å`;
-  $("sl-d").title = `The plane is ${(P.d - P.dRange[0]).toFixed(3)} Å into the cell, of ${P.depth.toFixed(3)} Å, along the normal of (${SL.hkl.join(" ")})`;
-}
+/** Pressed states of the plane, scale, view, inset and colour-bar buttons (slice bar, panel, photo bar). */
 function segSlice() {
   for (const b of $("sl-planes").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SL.hkl.join(" ")));
-  const mode = SL.img ? SL.style && SL.style.mode : "";
+  const mode = SL.style ? SL.style.mode : "";
   for (const b of $("sl-scale").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === (mode === "log" ? "log" : "lin")));
+  for (const id of ["sl-view", "ph-view"]) for (const b of $(id).querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SV.main));
+  $("sl-inset").setAttribute("aria-pressed", String(SV.inset)); $("sl-bar").setAttribute("aria-pressed", String(SV.bar));
+  for (const b of $("ph-opts").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === "inset" ? SV.inset : SV.bar));
 }
 function setSlicePlane(hkl) {
   if (hkl.length !== 3 || hkl.some(x => !Number.isInteger(x)) || hkl.every(x => x === 0)) { toast("Give three whole numbers h k l, not all zero, e.g. 1 1 0.", true); $("sl-hkl").value = SL.hkl.join(" "); return; }
   SL.hkl = hkl; $("sl-hkl").value = hkl.join(" "); segSlice(); syncSlice();
 }
-/** The figure as SVG: the image (PNG, embedded), contour paths, the outline, atoms, a colour bar with its range. */
-function sliceSVG() {
-  const g = SL.img, P = g.plane, st = SL.style, W = 800, H = Math.round(W * P.height / P.width), X = s => (s * W).toFixed(2), Y = r => (H - r * H).toFixed(2);
+/** Switches the slice on or off (the Surface panel switch, the bar's close button, a new scene). */
+function setSliceOn(on) {
+  SL.on = on; $("slice").checked = on;
+  if (!on) { SL.img = null; SL.style = null; SL.fine = null; SV.main = "3d"; }
+  syncSlice(); requestRender();
+}
+/** Main view, inset or colour bar changed (slice bar or photo bar). */
+function setSliceView(ch) {
+  Object.assign(SV, ch);
+  if ("inset" in ch || "bar" in ch) saveSV();
+  syncSlice(); requestRender(); // resamples only when the 2D figure is now drawn much larger (liveFit)
+}
+/** The slice sampled for an image whose 2D figure has a longer side of px pixels (one image pixel per 2 output
+ *  pixels, at least the live sampling), coloured in the live style; kept for the next export of the same picture. */
+async function sliceFine(px) {
+  const fit = Math.max(Math.ceil(px / 2), SL.img ? Math.max(SL.img.W, SL.img.H) : 0), key = SL.key + "|" + fit;
+  if (SL.fine && SL.fine.key === key) return SL.fine.g;
+  let g = SL.img;
+  try { g = await sliceCall(fit, 4096, 8e6); g.canvas = colorCanvas(g, SL.style); } catch (e) { g = SL.img; }
+  SL.fine = { key, g };
+  return g;
+}
+/** The 2D figure as SVG: the image (PNG, embedded), contour paths, the outline, atoms, the colour bar with ticks. */
+async function sliceSVG() {
+  const g0 = SL.img, P = g0.plane, st = SL.style, W = 800, H = Math.round(W * P.height / P.width), g = await sliceFine(2 * W);
+  const X = s => (s * W).toFixed(2), Y = r => (H - r * H).toFixed(2), fs = 13;
   const flip = document.createElement("canvas"); flip.width = g.W; flip.height = g.H;
-  const fx = flip.getContext("2d"); fx.translate(0, g.H); fx.scale(1, -1); fx.drawImage(SL.canvas, 0, 0);
-  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W + 90}" height="${H}" viewBox="0 0 ${W + 90} ${H}" font-family="Helvetica, Arial, sans-serif">`,
+  const fx = flip.getContext("2d"); fx.translate(0, g.H); fx.scale(1, -1); fx.drawImage(g.canvas, 0, 0);
+  const bt = barTicks(st.mode, st.lo, st.hi), lab = Math.max(0, ...bt.ticks.map(t => 0.6 * fs * t.text.length)), title = barTitle();
+  const bx = W + 1.1 * fs, bw = 0.85 * fs, bh = 0.8 * H, by = 0.1 * H, TW = Math.ceil(bx + bw + 0.65 * fs + lab + 2.2 * fs);
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${TW}" height="${H}" viewBox="0 0 ${TW} ${H}" font-family="Helvetica, Arial, sans-serif" font-size="${fs}">`,
     `<image x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none" xlink:href="${flip.toDataURL("image/png")}"/>`];
   if (SL.iso) for (const c of sliceLevels(st)) {
     const seg = contours(g.values, g.W, g.H, c);
     let d = "";
     for (let i = 0; i < seg.length; i += 4) d += `M${X(seg[i] / g.W)} ${Y(seg[i + 1] / g.H)}L${X(seg[i + 2] / g.W)} ${Y(seg[i + 3] / g.H)}`;
-    if (d) parts.push(`<path d="${d}" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"${c < 0 ? ' stroke-dasharray="4 3"' : ""}/>`);
+    if (d) parts.push(`<path d="${d}" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8" stroke-linecap="round"${c < 0 ? ' stroke-dasharray="4 3"' : ""}/>`);
   }
   parts.push(`<polygon points="${P.poly.map(([s, r]) => `${X(s)},${Y(r)}`).join(" ")}" fill="none" stroke="#000" stroke-opacity="0.45"/>`);
-  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${elColor(a.el)}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
+  if (SL.atoms) for (const a of sliceAtoms(P)) parts.push(`<circle cx="${X(a.s)}" cy="${Y(a.r)}" r="${Math.max(2, a.rad * W / P.width).toFixed(2)}" fill="${a.color}" fill-opacity="${(0.45 + 0.55 * a.w).toFixed(2)}" stroke="#000" stroke-opacity="0.6"><title>${esc(a.el)}</title></circle>`);
   const t = lut(st.map), stops = [];
-  for (let i = 0; i <= 16; i++) { const k = Math.round(255 * i / 16); stops.push(`<stop offset="${(i / 16).toFixed(4)}" stop-color="rgb(${t[3 * k]},${t[3 * k + 1]},${t[3 * k + 2]})"/>`); }
-  const m = Math.max(Math.abs(st.lo), Math.abs(st.hi)), top = st.mode === "signed" ? m : st.hi, bot = st.mode === "signed" ? -m : st.lo;
+  for (let i = 0; i <= 32; i++) { const k = Math.round(255 * i / 32); stops.push(`<stop offset="${(i / 32).toFixed(4)}" stop-color="rgb(${t[3 * k]},${t[3 * k + 1]},${t[3 * k + 2]})"/>`); }
   parts.push(`<defs><linearGradient id="cb" x1="0" y1="1" x2="0" y2="0">${stops.join("")}</linearGradient></defs>`,
-    `<rect x="${W + 14}" y="20" width="12" height="${H - 40}" fill="url(#cb)"/>`,
-    `<text x="${W + 30}" y="28" font-size="11">${esc(fmt(top))}</text><text x="${W + 30}" y="${H - 20}" font-size="11">${esc(fmt(bot))}</text>`,
-    `<text x="${W + 30}" y="${H / 2}" font-size="10" fill="#666">${esc((g.f.unit || "") + (st.mode === "log" ? " (log)" : ""))}</text></svg>`);
+    `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="url(#cb)" stroke="#15171b" stroke-opacity="0.7" stroke-width="0.8"/>`);
+  for (const tk of bt.ticks) {
+    const y = (by + bh - tk.x * bh).toFixed(1);
+    parts.push(`<line x1="${(bx + bw).toFixed(1)}" x2="${(bx + bw + 0.35 * fs).toFixed(1)}" y1="${y}" y2="${y}" stroke="#15171b" stroke-width="0.8"/><text x="${(bx + bw + 0.65 * fs).toFixed(1)}" y="${y}" dominant-baseline="middle" fill="#15171b">${esc(tk.text)}</text>`);
+  }
+  if (bt.mult) parts.push(`<text x="${bx.toFixed(1)}" y="${(by - 0.45 * fs).toFixed(1)}" fill="#15171b">${esc(bt.mult)}</text>`);
+  if (title) { const tx = bx + bw + 0.65 * fs + lab + 1.1 * fs, ty = by + bh / 2; parts.push(`<text transform="translate(${tx.toFixed(1)} ${ty.toFixed(1)}) rotate(-90)" text-anchor="middle" dominant-baseline="middle" fill="#15171b">${esc(title)}</text>`); }
+  parts.push("</svg>");
   return parts.join("\n");
 }
 function sliceName(ext) { return `${($("doc-name").textContent || "slice").replace(/[^\w.+-]+/g, "_")}-slice-${SL.hkl.join("")}-${SL.t.toFixed(3)}.${ext}`; }
-$("slice").addEventListener("change", e => { SL.on = e.target.checked; if (!SL.on) { SL.img = null; } syncSlice(); if (SL.on) setTimeout(drawSliceWindow, 0); });
-$("sl-x").addEventListener("click", () => { $("slice").checked = false; SL.on = false; SL.img = null; syncSlice(); requestRender(); });
-$("sl-big").addEventListener("click", () => { const on = !$("slicewin").classList.contains("big"); $("slicewin").classList.toggle("big", on); $("sl-big").setAttribute("aria-pressed", String(on)); drawSliceWindow(); });
+$("slice").addEventListener("change", e => setSliceOn(e.target.checked));
+$("sl-x").addEventListener("click", () => setSliceOn(false));
 $("sl-planes").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setSlicePlane(b.value.split(" ").map(Number)); });
 $("sl-hkl").addEventListener("change", e => setSlicePlane(e.target.value.trim().split(/[\s,]+/).map(Number)));
 $("sl-t").addEventListener("input", e => { SL.t = +e.target.value; SL.key = "moving"; requestSlice(true); });
 $("sl-t").addEventListener("change", e => { SL.t = +e.target.value; SL.key = ""; syncSlice(); });
-$("sl-scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { SL.scale = b.value; paintSlice(); } });
-$("sl-map").addEventListener("change", e => { SL.map = e.target.value; paintSlice(); });
-$("sl-iso").addEventListener("change", e => { SL.iso = e.target.checked; drawSliceWindow(); });
-$("sl-atoms").addEventListener("change", e => { SL.atoms = e.target.checked; drawSliceWindow(); });
-$("sl-3d").addEventListener("change", e => { SL.in3d = e.target.checked; paintSlice(); });
-$("sl-png").addEventListener("click", () => {
-  if (!SL.img) return;
-  const P = SL.img.plane, w = 2000, h = Math.round(w * P.height / P.width), c = document.createElement("canvas");
-  c.width = w; c.height = h; drawSliceFigure(c.getContext("2d"), w, h, w / 400);
-  c.toBlob(b => download(b, sliceName("png")), "image/png");
+$("sl-scale").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { SL.scale = b.value; SL.fine = null; paintSlice(); } });
+$("sl-map").addEventListener("change", e => { SL.map = e.target.value; SL.fine = null; paintSlice(); });
+$("sl-iso").addEventListener("change", e => { SL.iso = e.target.checked; drawSliceViews(); });
+$("sl-atoms").addEventListener("change", e => { SL.atoms = e.target.checked; drawSliceViews(); });
+$("sl-3d").addEventListener("change", e => { SL.in3d = e.target.checked; paintSlice(); applySliceView(); });
+for (const id of ["sl-view", "ph-view"]) $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (b && b.value !== SV.main) setSliceView({ main: b.value }); });
+$("sl-inset").addEventListener("click", () => setSliceView({ inset: !SV.inset }));
+$("sl-bar").addEventListener("click", () => setSliceView({ bar: !SV.bar }));
+$("ph-opts").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setSliceView(b.value === "inset" ? { inset: !SV.inset } : { bar: !SV.bar }); });
+$("sli-x").addEventListener("click", () => setSliceView({ inset: false }));
+$("sl-svg").addEventListener("click", async () => {
+  if (!SL.img || !SL.style) return;
+  busy(true);
+  try { download(new Blob([await sliceSVG()], { type: "image/svg+xml" }), sliceName("svg")); }
+  catch (e) { toast("Could not write the SVG: " + (e.message || e), true); }
+  finally { busy(false); }
 });
-$("sl-svg").addEventListener("click", () => { if (SL.img) download(new Blob([sliceSVG()], { type: "image/svg+xml" }), sliceName("svg")); });
-// the window moves by its header
-$("sl-head").addEventListener("pointerdown", e => {
-  if (e.target.closest("button, input")) return;
-  const win = $("slicewin"), r = win.getBoundingClientRect(), x0 = e.clientX - r.left, y0 = e.clientY - r.top;
-  const move = ev => { win.style.left = Math.max(0, ev.clientX - x0) + "px"; win.style.top = Math.max(0, ev.clientY - y0) + "px"; win.style.bottom = "auto"; };
-  const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+// the inset: the handle (or the 2D figure itself) moves it, the corner grip resizes it (bottom left stays), a drag on
+// the 3D view turns it (right button, Ctrl or Cmd: pans) and the wheel zooms it
+function moveInset(e) {
+  e.preventDefault();
+  const b0 = insetBox(), x0 = e.clientX, y0 = e.clientY, el = e.currentTarget;
+  if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
+  const move = ev => { SV.pos = [b0.x + ev.clientX - x0, window.innerHeight - (b0.y + ev.clientY - y0) - b0.h]; placeInset(); };
+  const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); const b = insetBox(); SV.pos = [b.x, window.innerHeight - b.y - b.h]; saveSV(); };
+  el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+}
+$("sli-move").addEventListener("pointerdown", moveInset);
+$("sli-cv").addEventListener("pointerdown", moveInset);
+$("sli-grip").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const g = e.currentTarget, x0 = e.clientX, y0 = e.clientY, b0 = insetBox(), s0 = Math.max(120, Math.min(SV.size, window.innerWidth * 0.6, window.innerHeight * 0.7));
+  if (!SV.pos) SV.pos = [b0.x, window.innerHeight - b0.y - b0.h];
+  if (g.setPointerCapture) g.setPointerCapture(e.pointerId);
+  const move = ev => { SV.size = Math.max(120, s0 + Math.max(ev.clientX - x0, y0 - ev.clientY)); placeInset(); if (slMode() === "2d") resize(); drawSliceViews(); };
+  const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); SV.size = Math.round(Math.max(120, Math.min(SV.size, window.innerWidth * 0.6, window.innerHeight * 0.7))); saveSV(); syncSlice(); };
+  g.addEventListener("pointermove", move); g.addEventListener("pointerup", up);
 });
-window.addEventListener("resize", () => { if (SL.on) drawSliceWindow(); });
+$("sli").addEventListener("pointerdown", e => {
+  if (slMode() !== "2d" || e.target !== canvas) return;
+  e.preventDefault();
+  const cv = canvas, pan = e.button !== 0 || e.ctrlKey || e.metaKey;
+  let x = e.clientX, y = e.clientY;
+  if (cv.setPointerCapture) cv.setPointerCapture(e.pointerId);
+  const move = ev => { if (pan) cam.panBy(ev.clientX - x, ev.clientY - y); else cam.rotateBy(ev.clientX - x, ev.clientY - y); x = ev.clientX; y = ev.clientY; requestRender(); drawTriad(); };
+  const up = () => { cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); };
+  cv.addEventListener("pointermove", move); cv.addEventListener("pointerup", up);
+});
+$("sli").addEventListener("wheel", e => { if (slMode() !== "2d" || e.target !== canvas) return; e.preventDefault(); cam.zoomBy(Math.exp(e.deltaY * (e.deltaMode ? 0.05 : 0.0015))); requestRender(); }, { passive: false });
+$("sli").addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("resize", () => { if (SL.on) syncSlice(); });
 
 /* ------------------------------------------------------------------ trajectory analysis */
 // off: per tab, the curves switched off (by key); fq: the per-frame quantities shown
@@ -2734,7 +2959,7 @@ document.addEventListener("keydown", e => { if (useOpen && e.key === "Escape") {
 startWorker();
 segState();
 // test hook (tests set globalThis.__isoviewTest before importing this module)
-if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, AN, cam, serialize, get disp() { return disp; } };
+if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, SV, AN, cam, serialize, savePhoto, requestRender, get disp() { return disp; }, get canvas() { return canvas; } };
 /* ------------------------------------------------------------------ embedding */
 /**
  * Embedded mode (?embed, in an iframe on a website or in a notebook): nothing is kept in or restored from this
