@@ -56,9 +56,9 @@
  * isotope for elements without a standard weight), as tabulated in ase.data.atomic_masses_iupac2016 (ASE 3.26);
  * unknown "X" = 1 amu.
  */
-import { fft1, nextPow2 } from "./fft.js?v=1004";
-import { zOf } from "./elements.js?v=1004";
-import { det3, inv3, params } from "./lattice.js?v=1004";
+import { fft1, nextPow2 } from "./fft.js?v=1005";
+import { zOf } from "./elements.js?v=1005";
+import { det3, inv3, params } from "./lattice.js?v=1005";
 
 const KB = 8.617333262e-5; // eV/K
 const AMU_A2_FS2 = 103.6426965; // eV per amu A^2/fs^2

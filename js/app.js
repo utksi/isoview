@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1004";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1004";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1004";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1004";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1004";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1004";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1004";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=1004";
-import { measureAll } from "./measure.js?v=1004";
-import { GifWriter, buildPalette } from "./gif.js?v=1004";
-import * as store from "./store.js?v=1004";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1004";
-import { chart, toCSV } from "./plot.js?v=1004";
-import { openPicker } from "./picker.js?v=1004";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=1004";
-import { colormap } from "./slice.js?v=1004";
-import { wignerSeitz, kpath } from "./bz.js?v=1004";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1005";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1005";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1005";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1005";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1005";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1005";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1005";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=1005";
+import { measureAll } from "./measure.js?v=1005";
+import { GifWriter, buildPalette } from "./gif.js?v=1005";
+import * as store from "./store.js?v=1005";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1005";
+import { chart, toCSV } from "./plot.js?v=1005";
+import { openPicker } from "./picker.js?v=1005";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=1005";
+import { colormap } from "./slice.js?v=1005";
+import { wignerSeitz, kpath } from "./bz.js?v=1005";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -167,7 +167,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1004", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1005", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -430,7 +430,16 @@ function rows(toward, up) {
   const u = norm(u0) > 1e-6 ? unit(u0) : unit(cross(t, Math.abs(t[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
   return [cross(u, t), u, t];
 }
-function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); fitClear = true; }
+/** Frames the scene sphere (c, r) in the view and, once the panels are laid out, keeps it clear of them (fitClear).
+ *  Camera.fit uses the vertical field of view; a view narrower than tall (a side-by-side pane, a phone) needs the
+ *  horizontal one, tan(fx / 2) = a tan(fy / 2) with a = width / height: perspective d >= 1.08 r / sin(fx / 2),
+ *  orthographic (half-width d tan(fy / 2) a) d >= 1.08 r / (a tan(fy / 2)). */
+function fit() {
+  const s = sceneSphere(); cam.fit(s.c, s.r);
+  const a = cam.w / cam.h, t = Math.tan(cam.fovy / 2);
+  if (a < 1) cam.dist = Math.max(cam.dist, cam.ortho ? 1.08 * cam.radius / (a * t) : 1.08 * cam.radius / Math.sin(Math.atan(a * t)));
+  fitClear = true;
+}
 /** Boxes (CSS px, { x, y, w, h }, clipped to the window) of the panels over the view: the panel at the right, the
  *  slice inset, the Brillouin-zone inset and the analysis window; hidden and tucked ones are left out. None in Photo
  *  Mode, where the photo lays out its own inset. */
