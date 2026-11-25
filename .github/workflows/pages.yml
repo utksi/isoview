@@ -1,0 +1,87 @@
+# Publishes the site: branch main at https://utkarsh.science/isoview/ and branch next (the test site) at
+# https://utkarsh.science/isoview/next/. A push to either branch rebuilds both. Each copy must pass its unit tests;
+# a test site that fails is replaced by a short notice, so it never blocks the live site. The test copy gets a
+# noindex tag and <meta name="isoview-channel" content="next">, which keeps its saved scene and settings apart from
+# the live site's (js/store.js). On pushes to next, screenshots of fixed scenes of both copies are kept as an artifact.
+name: Pages
+
+on:
+  push:
+    branches: [main, next]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, path: live }
+      - name: Check out the test site
+        id: co
+        run: |
+          if git ls-remote --exit-code --heads "https://github.com/${{ github.repository }}" next >/dev/null; then
+            git clone --depth 1 --branch next "https://github.com/${{ github.repository }}" next-src
+            echo "has=1" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Test the live site
+        run: cd live && node tests/run.mjs
+      - name: Test the test site
+        id: nt
+        if: steps.co.outputs.has == '1'
+        continue-on-error: true
+        run: cd next-src && node tests/run.mjs
+      - name: Assemble
+        run: |
+          mkdir _site
+          rsync -a --exclude .git --exclude .github live/ _site/
+          mkdir -p _site/next
+          if [ "${{ steps.nt.outcome }}" = "success" ]; then
+            rsync -a --exclude .git --exclude .github next-src/ _site/next/
+            sed -i '0,/<meta charset="utf-8">/s//<meta charset="utf-8">\n<meta name="robots" content="noindex, nofollow">\n<meta name="isoview-channel" content="next">/' _site/next/index.html
+            grep -q 'name="isoview-channel"' _site/next/index.html
+          else
+            printf '%s\n' '<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>isoview test site</title><p>The test site has no build that passes its tests. The live site is at <a href="../">utkarsh.science/isoview</a>.</p>' > _site/next/index.html
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.d.outputs.page_url }}
+    steps:
+      - id: d
+        uses: actions/deploy-pages@v4
+
+  shots:
+    if: github.ref == 'refs/heads/next' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, path: live }
+      - uses: actions/download-artifact@v4
+        with: { name: github-pages, path: art }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Screenshots
+        run: |
+          mkdir -p srv/isoview && tar -xf art/artifact.tar -C srv/isoview
+          (cd srv && python3 -m http.server 8080 >/dev/null 2>&1 &)
+          cd live && npm install --no-save --no-package-lock puppeteer-core@23.11.1 >/dev/null
+          node tools/shots.mjs "$(command -v google-chrome)" ../shots live=http://localhost:8080/isoview/ next=http://localhost:8080/isoview/next/
+      - uses: actions/upload-artifact@v4
+        with: { name: shots, path: shots, retention-days: 14 }

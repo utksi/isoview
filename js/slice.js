@@ -35,7 +35,7 @@
  * Linear labels whose largest magnitude has exponent e <= -3 or e >= 4 are written as v / 10^e with "x10^e" once
  * above the bar.
  */
-import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=34";
+import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=35";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];

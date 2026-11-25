@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=34";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=34";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=34";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=34";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=34";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=34";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=34";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=34";
-import { measureAll } from "./measure.js?v=34";
-import { GifWriter, buildPalette } from "./gif.js?v=34";
-import * as store from "./store.js?v=34";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=34";
-import { chart, toCSV } from "./plot.js?v=34";
-import { openPicker } from "./picker.js?v=34";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=34";
-import { colormap } from "./slice.js?v=34";
-import { wignerSeitz, kpath } from "./bz.js?v=34";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=35";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=35";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=35";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=35";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=35";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=35";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=35";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=35";
+import { measureAll } from "./measure.js?v=35";
+import { GifWriter, buildPalette } from "./gif.js?v=35";
+import * as store from "./store.js?v=35";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=35";
+import { chart, toCSV } from "./plot.js?v=35";
+import { openPicker } from "./picker.js?v=35";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=35";
+import { colormap } from "./slice.js?v=35";
+import { wignerSeitz, kpath } from "./bz.js?v=35";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -94,20 +94,20 @@ const SL = { on: false, hkl: [0, 0, 1], t: 0.5, scale: "auto", map: "auto", iso:
 // ([left, bottom] CSS px, null: the default corner); the last three are kept in this browser
 const SV = { main: "3d", inset: true, bar: true, size: 240, pos: null };
 try {
-  const v = JSON.parse(localStorage.getItem("isoview-slice") || "{}");
+  const v = JSON.parse(localStorage.getItem(store.PREFIX + "slice") || "{}");
   if (typeof v.inset === "boolean") SV.inset = v.inset;
   if (typeof v.bar === "boolean") SV.bar = v.bar;
   if (v.size >= 120) SV.size = v.size;
   if (Array.isArray(v.pos) && v.pos.every(Number.isFinite)) SV.pos = v.pos;
 } catch (e) { /* storage unavailable */ }
-const saveSV = () => { try { localStorage.setItem("isoview-slice", JSON.stringify({ inset: SV.inset, bar: SV.bar, size: SV.size, pos: SV.pos })); } catch (e) { /* storage unavailable */ } };
+const saveSV = () => { try { localStorage.setItem(store.PREFIX + "slice", JSON.stringify({ inset: SV.inset, bar: SV.bar, size: SV.size, pos: SV.pos })); } catch (e) { /* storage unavailable */ } };
 const SL_FS = 12, SL_FS_INSET = 10; // CSS px: colour-bar text in the main view and in the inset
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
 const LOOKS = { classic: [0, 0, 0], soft: [1, 0, 0.5], glossy: [2, 0, 0], toon: [3, 1.5, 0], outline: [4, 1.3, 0] };
 // the look of a first visit; afterwards the last one chosen (localStorage isoview-look, also for new scenes)
 const LOOK0 = "glossy";
-try { const v = localStorage.getItem("isoview-look"); if (LOOKS[v]) S.look = v; } catch (e) { /* storage unavailable */ }
+try { const v = localStorage.getItem(store.PREFIX + "look"); if (LOOKS[v]) S.look = v; } catch (e) { /* storage unavailable */ }
 let nextItem = 1, nextLayer = 1;
 const cam = new Camera();
 let R = null, canvas = $("gl"), pal = {}, disp = { atoms: [], centers: new Float32Array(0), radii: new Float32Array(0) };
@@ -161,7 +161,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=34", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=35", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1722,14 +1722,14 @@ function bindSeg(key, fn) {
 bindSeg("style", v => { S.style = v; buildStructure(); });
 bindSeg("look", v => {
   S.look = v; requestRender();
-  if (!EMBED) try { localStorage.setItem("isoview-look", v); } catch (e) { /* storage unavailable */ }
+  if (!EMBED) try { localStorage.setItem(store.PREFIX + "look", v); } catch (e) { /* storage unavailable */ }
 });
 bindSeg("res", v => { S.res = v; refreshSurfaces(); });
 bindSeg("proj", v => { S.proj = v; cam.ortho = v === "ortho"; requestRender(); });
 bindSeg("theme", v => {
   S.theme = v;
   if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v);
-  try { localStorage.setItem("isoview-theme", v); } catch (e) { /* storage unavailable */ }
+  try { localStorage.setItem(store.PREFIX + "theme", v); } catch (e) { /* storage unavailable */ }
   restyle();
 });
 bindSeg("loop", v => { S.loop = v; playDir = 1; });
@@ -1758,8 +1758,8 @@ $("bands").addEventListener("keydown", e => {
 $("scale").addEventListener("input", e => { S.scale = +e.target.value; buildStructure(); });
 $("bonds").addEventListener("change", e => { S.bonds = e.target.checked; $("row-tol").hidden = !S.bonds; buildStructure(); });
 $("tol").addEventListener("input", e => { S.tol = +e.target.value; $("tol-out").textContent = S.tol.toFixed(2); buildStructure(); });
-$("tol-keep").addEventListener("change", e => { try { localStorage.setItem("isoview-keep-reach", e.target.checked ? "1" : "0"); } catch (err) { /* storage unavailable */ } });
-try { $("tol-keep").checked = localStorage.getItem("isoview-keep-reach") === "1"; } catch (e) { /* storage unavailable */ }
+$("tol-keep").addEventListener("change", e => { try { localStorage.setItem(store.PREFIX + "keep-reach", e.target.checked ? "1" : "0"); } catch (err) { /* storage unavailable */ } });
+try { $("tol-keep").checked = localStorage.getItem(store.PREFIX + "keep-reach") === "1"; } catch (e) { /* storage unavailable */ }
 $("cell").addEventListener("change", e => { S.cell = e.target.checked; buildStructure(); });
 $("species").addEventListener("change", e => {
   const el = e.target.dataset.el;
@@ -1911,7 +1911,7 @@ window.addEventListener("keydown", e => {
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
-try { const t = localStorage.getItem("isoview-theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
+try { const t = localStorage.getItem(store.PREFIX + "theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
 
 /* ------------------------------------------------------------------ Brillouin zone */
 const BZ_SIZE = 5; // drawing units for the largest |k| of the zone (the camera works best with scenes of a few units)
@@ -1985,7 +1985,7 @@ $("bz").addEventListener("change", e => setBZ(e.target.checked));
 // rotation shows both from the same direction. Dragging in the box turns both; the wheel zooms the box; the corner
 // grip resizes it (kept in localStorage).
 const BZI = { R: null, cam: new Camera(), size: 220, on: true, zoom: 1, starting: false };
-try { const v = +localStorage.getItem("isoview-bzi-size"); if (v >= 120) BZI.size = v; BZI.on = localStorage.getItem("isoview-bzi") !== "0"; } catch (e) { /* storage unavailable */ }
+try { const v = +localStorage.getItem(store.PREFIX + "bzi-size"); if (v >= 120) BZI.size = v; BZI.on = localStorage.getItem(store.PREFIX + "bzi") !== "0"; } catch (e) { /* storage unavailable */ }
 $("bzi").checked = BZI.on;
 /** Side of the box in CSS px: the stored size, at most half the window width and 70% of its height. */
 const insetSide = () => Math.round(Math.max(120, Math.min(BZI.size, window.innerWidth * 0.5, window.innerHeight * 0.7)));
@@ -2037,7 +2037,7 @@ function drawInset(r = BZI.R, w = r.canvas.width, h = r.canvas.height, bg = live
 }
 $("bzi").addEventListener("change", e => {
   BZI.on = e.target.checked;
-  try { localStorage.setItem("isoview-bzi", BZI.on ? "1" : "0"); } catch (err) { /* storage unavailable */ }
+  try { localStorage.setItem(store.PREFIX + "bzi", BZI.on ? "1" : "0"); } catch (err) { /* storage unavailable */ }
   buildInset();
 });
 $("bzi-x").addEventListener("click", () => { $("bzi").checked = false; $("bzi").dispatchEvent(new Event("change")); });
@@ -2060,7 +2060,7 @@ $("bzi-grip").addEventListener("pointerdown", e => {
   g.setPointerCapture(e.pointerId);
   // the box is anchored at its bottom left corner: dragging the top right corner up or right enlarges it
   const move = ev => { BZI.size = Math.max(120, s0 + Math.max(ev.clientX - x0, y0 - ev.clientY)); sizeInset(); };
-  const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); try { localStorage.setItem("isoview-bzi-size", String(insetSide())); } catch (err) { /* storage unavailable */ } };
+  const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); try { localStorage.setItem(store.PREFIX + "bzi-size", String(insetSide())); } catch (err) { /* storage unavailable */ } };
   g.addEventListener("pointermove", move); g.addEventListener("pointerup", up);
 });
 window.addEventListener("resize", () => { if (S.bz && BZI.R && !$("bzinset").hidden) sizeInset(); });
@@ -2075,7 +2075,7 @@ window.addEventListener("resize", () => { if (S.bz && BZI.R && !$("bzinset").hid
 // and the colour bar as they show (renderPhoto).
 const PH = { on: false, size: "2", bg: "scene" };
 const PH_SS = 2, PH_TILE = 2048, PH_MAXPX = 16e6, PH_LIVE = 6e6; // PH_MAXPX: the largest 2D canvas Safari allows (2^24 px)
-try { const v = JSON.parse(localStorage.getItem("isoview-photo") || "{}"); if (["screen", "2", "4"].includes(v.size)) PH.size = v.size; if (["scene", "white", "clear"].includes(v.bg)) PH.bg = v.bg; } catch (e) { /* storage unavailable */ }
+try { const v = JSON.parse(localStorage.getItem(store.PREFIX + "photo") || "{}"); if (["screen", "2", "4"].includes(v.size)) PH.size = v.size; if (["scene", "white", "clear"].includes(v.bg)) PH.bg = v.bg; } catch (e) { /* storage unavailable */ }
 /** Background of the live view: white while photo mode shows a white-background photo, else the theme's. */
 function liveBg() { return PH.on && PH.bg === "white" ? [1, 1, 1] : pal.bg; }
 /** Output size: the window (CSS px) times the chosen scale (Screen: the device pixel ratio), at most PH_MAXPX px. */
@@ -2182,7 +2182,7 @@ function copyPhoto() {
   navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     .then(() => toast("Copied the image."), e => toast("Could not copy: " + (e.message || e), true));
 }
-const savePhotoPrefs = () => { try { localStorage.setItem("isoview-photo", JSON.stringify({ size: PH.size, bg: PH.bg })); } catch (e) { /* storage unavailable */ } };
+const savePhotoPrefs = () => { try { localStorage.setItem(store.PREFIX + "photo", JSON.stringify({ size: PH.size, bg: PH.bg })); } catch (e) { /* storage unavailable */ } };
 $("btn-photo").addEventListener("click", () => setPhoto(true));
 $("ph-done").addEventListener("click", () => setPhoto(false));
 $("ph-save").addEventListener("click", savePhoto);
