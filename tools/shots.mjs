@@ -3,7 +3,7 @@
 /**
  * Screenshots of fixed scenes, for checking the look of a build (run by .github/workflows/pages.yml on GitHub's
  * runner, against the assembled site served locally). Each shot uses a fresh browser context, so no saved scene or
- * setting carries over; the theme and (on the test site) the typeface are put into localStorage before the page loads.
+ * setting carries over; the theme and (on the test site) the text typeface are put into localStorage before the page loads.
  * Rendering is WebGL2 on SwiftShader (software), so the WebGPU path and real frame rates are not shown.
  *
  * Usage: node tools/shots.mjs <chrome executable> <out dir> <label>=<site url> [<label>=<site url> ...]
@@ -15,7 +15,8 @@ import puppeteer from "puppeteer-core";
 const [chrome, out, ...sites] = process.argv.slice(2);
 // scene: a sample from the opening page (data-example), or null for the opening page itself
 const SCENES = [["home", null], ["rutile", "rutile"], ["density", "si"], ["slice2d", "sislice"], ["orbital", "n2"], ["md", "vasprun"]];
-const FONTS = ["system", "inter", "source", "plex"];
+// text typefaces shown on the test site (its pickers; the mono face stays at the test site default)
+const FONTS = ["system", "inter", "source", "fira", "noto", "roboto"];
 
 mkdirSync(out, { recursive: true });
 const browser = await puppeteer.launch({
@@ -36,7 +37,7 @@ async function shot1(url, file, { theme, example, font, dpr = 1 }) {
   await page.evaluateOnNewDocument((theme, font) => {
     for (const p of ["isoview-", "isoview-next-"]) {
       localStorage.setItem(p + "theme", theme);
-      if (font) localStorage.setItem(p + "font", font);
+      if (font) localStorage.setItem(p + "font-text", font);
     }
   }, theme, font || "");
   await page.goto(url + (url.includes("?") ? "&" : "?") + "gl=webgl2", { waitUntil: "networkidle0", timeout: 60000 });

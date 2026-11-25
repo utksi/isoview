@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1002";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1002";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1002";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1002";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1002";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1002";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1002";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=1002";
-import { measureAll } from "./measure.js?v=1002";
-import { GifWriter, buildPalette } from "./gif.js?v=1002";
-import * as store from "./store.js?v=1002";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1002";
-import { chart, toCSV } from "./plot.js?v=1002";
-import { openPicker } from "./picker.js?v=1002";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=1002";
-import { colormap } from "./slice.js?v=1002";
-import { wignerSeitz, kpath } from "./bz.js?v=1002";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=37";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=37";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=37";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=37";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=37";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=37";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=37";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=37";
+import { measureAll } from "./measure.js?v=37";
+import { GifWriter, buildPalette } from "./gif.js?v=37";
+import * as store from "./store.js?v=37";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=37";
+import { chart, toCSV } from "./plot.js?v=37";
+import { openPicker } from "./picker.js?v=37";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=37";
+import { colormap } from "./slice.js?v=37";
+import { wignerSeitz, kpath } from "./bz.js?v=37";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -163,7 +163,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1002", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=37", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
