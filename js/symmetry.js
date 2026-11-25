@@ -27,7 +27,7 @@
  * The result is the conventional cell of the lattice's own symmetry; for a structure whose atoms break the lattice
  * symmetry it is a valid cell of the crystal but not necessarily the standard setting of its space group.
  */
-import { inv3, det3, cartToFrac, fracToCart, norm, cross, dot } from "./lattice.js?v=34";
+import { inv3, det3, cartToFrac, fracToCart, norm, cross, dot } from "./lattice.js?v=35";
 
 const wrap1 = x => { const y = x - Math.floor(x); return y >= 1 - 1e-12 ? 0 : y; };
 

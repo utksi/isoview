@@ -9,7 +9,16 @@
  * within LIMIT bytes in total; larger items are described in the state but must be opened again after a reload.
  * Every call resolves (to null or false) instead of failing when storage is unavailable (private windows, blocked
  * site data, test environments).
+ * Channel: a copy of the site published with <meta name="isoview-channel" content="C"> (the test site at /next/) keeps
+ * its data apart from the live site on the same origin: database "isoview-C" and localStorage keys "isoview-C-*"
+ * instead of "isoview" and "isoview-*".
  */
+export const CHANNEL = (() => {
+  try { const m = document.querySelector('meta[name="isoview-channel"]'); return m && /^[a-z0-9]+$/.test(m.content) ? m.content : ""; }
+  catch (e) { return ""; }
+})();
+/** Prefix of every localStorage key of this copy of the site. */
+export const PREFIX = CHANNEL ? `isoview-${CHANNEL}-` : "isoview-";
 export const LIMIT = 512 * 2 ** 20; // bytes of files kept per scene
 
 let dbp = null;
@@ -18,7 +27,7 @@ function db() {
   dbp = new Promise(res => {
     try {
       if (typeof indexedDB === "undefined") return res(null);
-      const r = indexedDB.open("isoview", 1);
+      const r = indexedDB.open(CHANNEL ? "isoview-" + CHANNEL : "isoview", 1);
       r.onupgradeneeded = () => { r.result.createObjectStore("files"); r.result.createObjectStore("state"); };
       r.onsuccess = () => res(r.result);
       r.onerror = () => res(null);
