@@ -10,7 +10,7 @@
  * Slice plane (setSlice): drawn after the labels and before the translucent meshes, depth-tested and depth-writing,
  * premultiplied blending; its image is uploaded premultiplied with mipmaps.
  */
-import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=38";
+import { GLSL, QUAD, LINEQ, CYL } from "./shaders.js?v=1007";
 
 export class WebGL2Renderer {
   static create(canvas, onError) {
