@@ -14,7 +14,9 @@ import puppeteer from "puppeteer-core";
 
 const [chrome, out, ...sites] = process.argv.slice(2);
 // scene: a sample from the opening page (data-example), or null for the opening page itself
-const SCENES = [["home", null], ["rutile", "rutile"], ["density", "si"], ["slice2d", "sislice"], ["orbital", "n2"], ["md", "vasprun"]];
+// [name, sample, selectors clicked afterwards in order (a missing one ends the shot unsaved)]
+const SCENES = [["home", null], ["rutile", "rutile"], ["density", "si"], ["slice2d", "sislice"], ["orbital", "n2"], ["md", "vasprun"],
+  ["photo-side", "sislice", ["#btn-photo", "#ph-layout [value=side]"]], ["photo-stack", "sislice", ["#btn-photo", "#ph-layout [value=stack]"]]];
 // text typefaces shown on the test site (its pickers; the mono face stays at the test site default)
 const FONTS = ["system", "inter", "source", "fira", "noto", "roboto"];
 
@@ -28,7 +30,7 @@ const browser = await puppeteer.launch({
 async function shot(url, file, opts) {
   try { await shot1(url, file, opts); } catch (e) { console.log(file, "FAILED:", e.message); }
 }
-async function shot1(url, file, { theme, example, font, dpr = 1 }) {
+async function shot1(url, file, { theme, example, font, dpr = 1, clicks = [] }) {
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
   const errors = [];
@@ -45,6 +47,10 @@ async function shot1(url, file, { theme, example, font, dpr = 1 }) {
     await page.click(`[data-example="${example}"]`);
     await page.waitForFunction(() => document.getElementById("empty").hidden && document.getElementById("busy").hidden, { timeout: 90000 });
   }
+  for (const sel of clicks) {
+    if (!(await page.$(sel))) { await ctx.close(); console.log(file, "skipped: no", sel); return; }
+    await page.click(sel); await new Promise(r => setTimeout(r, 400));
+  }
   await new Promise(r => setTimeout(r, 2500)); // WHY: meshing, slice images and fonts settle after the busy flag clears
   await page.screenshot({ path: file });
   await ctx.close();
@@ -54,8 +60,8 @@ async function shot1(url, file, { theme, example, font, dpr = 1 }) {
 
 for (const s of sites) {
   const [label, url] = s.split("=");
-  for (const [name, example] of SCENES) for (const theme of ["light", "dark"]) {
-    await shot(url, `${out}/${label}-${name}-${theme}.png`, { theme, example });
+  for (const [name, example, clicks] of SCENES) for (const theme of ["light", "dark"]) {
+    await shot(url, `${out}/${label}-${name}-${theme}.png`, { theme, example, clicks });
   }
   await shot(url, `${out}/${label}-rutile-light-dpr2.png`, { theme: "light", example: "rutile", dpr: 2 });
   if (label === "next") for (const font of FONTS) await shot(url, `${out}/${label}-rutile-light-${font}.png`, { theme: "light", example: "rutile", font });
