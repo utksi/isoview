@@ -12,7 +12,7 @@
  * Slice plane (setSlice, 40-byte instance): after the labels, before the translucent meshes; depth test and depth
  * writes, premultiplied blending; its image is a premultiplied rgba8 texture with a mip chain made the same way.
  */
-import { WGSL, WGSL_LABEL, WGSL_SLICE, QUAD, LINEQ, CYL } from "./shaders.js?v=35";
+import { WGSL, WGSL_LABEL, WGSL_SLICE, QUAD, LINEQ, CYL } from "./shaders.js?v=37";
 
 const GPUB = () => globalThis.GPUBufferUsage, GPUS = () => globalThis.GPUShaderStage;
 

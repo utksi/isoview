@@ -47,26 +47,28 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=35";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=35";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=35";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=35";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=35";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=35";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=35";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=35";
-import { measureAll } from "./measure.js?v=35";
-import { GifWriter, buildPalette } from "./gif.js?v=35";
-import * as store from "./store.js?v=35";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=35";
-import { chart, toCSV } from "./plot.js?v=35";
-import { openPicker } from "./picker.js?v=35";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=35";
-import { colormap } from "./slice.js?v=35";
-import { wignerSeitz, kpath } from "./bz.js?v=35";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=37";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=37";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=37";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=37";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=37";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=37";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=37";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=37";
+import { measureAll } from "./measure.js?v=37";
+import { GifWriter, buildPalette } from "./gif.js?v=37";
+import * as store from "./store.js?v=37";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=37";
+import { chart, toCSV } from "./plot.js?v=37";
+import { openPicker } from "./picker.js?v=37";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=37";
+import { colormap } from "./slice.js?v=37";
+import { wignerSeitz, kpath } from "./bz.js?v=37";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+/** Label atlas in the page typeface (--sans), so labels in the 3D view match the interface. */
+const atlasOf = strings => buildAtlas(strings, 112, css("--sans") || undefined);
 const qp = new URLSearchParams(location.search);
 const EMBED = qp.has("embed"); // inside an iframe on another page (initEmbed)
 // colour pairs (positive, negative) for successive field layers: mid-tones readable on light and dark backgrounds
@@ -161,7 +163,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=35", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=37", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -188,7 +190,7 @@ async function fallbackToWebGL2(msg) {
   if (!R) { toast(`WebGPU failed (${msg}) and WebGL2 is not available.`, true, 12000); return; }
   canvas = R.canvas; $("gfx").textContent = R.name + " (WebGPU failed)";
   readPalette(); R.setBackground(pal.bg); resize();
-  S.atlas = buildAtlas(atlasSpecies());
+  S.atlas = atlasOf(atlasSpecies());
   buildStructure(); refreshSurfaces();
   toast(`WebGPU reported an error (${msg}); switched to WebGL2.`, true, 9000);
 }
@@ -702,7 +704,7 @@ function derive(kind) {
   const wasVisible = L.visible;
   L.visible = false; S.activeAtoms = NL.id;
   pushUndo({ type: "derive", layer: NL.id, source: L.id, wasVisible, label: `${kind} cell` });
-  S.atlas = buildAtlas(atlasSpecies());
+  S.atlas = atlasOf(atlasSpecies());
   buildLayersUI(); updateChrome(); buildStructure(); refit(); syncShiftInputs();
   const what = kind === "primitive" ? `primitive cell (${res.structure.species.length} atoms, ${res.n} lattice points in the original)` : `conventional ${res.system} cell (${res.structure.species.length} atoms, ${res.z}× the primitive)`;
   toast(`Added the ${what} as a new layer; the original is hidden.`, false, 7000, { label: "Undo", fn: undo });
@@ -1292,7 +1294,7 @@ async function addItem(d, adding, quiet = false) {
     [FL.pos, FL.neg] = pickColors(FL);
     if (it.fields.length && !it.wave) initLevel(FL, false);
   }
-  S.atlas = buildAtlas(atlasSpecies());
+  S.atlas = atlasOf(atlasSpecies());
   $("empty").hidden = true;
   if (it.traj) { applyFrame(it); $("mv-to").value = maxFrames(); $("mv-from").max = $("mv-to").max = maxFrames(); }
   buildLayersUI(); updateChrome(); buildStructure();
@@ -1416,7 +1418,7 @@ async function restoreScene(st, files, stored = true) {
       delete L.want;
       if (want && want.b >= 0 && (want.b !== w.b || want.s !== w.s || want.k !== w.k || want.mode !== w.mode || want.half !== w.half || !itemOf(L).fields[L.fi])) { L.w = { ...want }; await showBand(L, want.b); }
     }
-    S.atlas = buildAtlas(atlasSpecies());
+    S.atlas = atlasOf(atlasSpecies());
     buildLayersUI(); updateChrome(); buildStructure(); syncFieldUI(); syncControls();
     for (const L of fieldLayers()) requestSurface(L);
     Object.assign(cam, { q: st.cam.q.slice(), dist: st.cam.dist, radius: st.cam.radius, target: st.cam.target.slice() });
@@ -1514,7 +1516,8 @@ async function example(id) {
       await addItem({ name: "hydrogen 3d(x²−y²), computed here", ...(await call("example", { name: "h3d" })), example: "h3d" }, false);
       return;
     }
-    const spec = SAMPLES[id], name = spec && (spec.file || spec);
+    // WHY: an entry is a file name or an object; a string has its own .slice method, so normalise before reading options
+    const spec = typeof SAMPLES[id] === "string" ? { file: SAMPLES[id] } : SAMPLES[id], name = spec && spec.file;
     if (!name) throw new Error(`There is no sample called "${id}".`);
     const r = await fetch("examples/" + name);
     if (!r.ok) throw new Error(`Could not load the sample (${r.status}).`);
@@ -1970,7 +1973,7 @@ function buildBZ() {
   R.setAtoms(packAtoms(pts), pts.length);
   R.setBonds(packBonds(bonds), bonds.length);
   R.setLines(packLines(segs), segs.length);
-  if (R.setLabels) { const atlas = buildAtlas(labels.map(l => l.text)); R.setLabels(packLabels(labels, atlas ? atlas.map : {}), atlas ? labels.length : 0, atlas); }
+  if (R.setLabels) { const atlas = atlasOf(labels.map(l => l.text)); R.setLabels(packLabels(labels, atlas ? atlas.map : {}), atlas ? labels.length : 0, atlas); }
   updateSelectionBar();
   const pathText = k.path.map(r => r.map(kLabel).join("–")).join(" | ");
   buildInset();
@@ -2608,12 +2611,16 @@ function anData(it) {
   return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
 }
 const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
+// WHY: most MD codes write 0.5-2 fs steps; without a value the temperature and spectra could not be shown at all
+const DT0 = 1; // fs per saved frame assumed when neither the file nor the user gives one
+/** True when the main trajectory's time step is the assumed DT0 (no typed value, none in the file). */
+const dtAssumed = () => { const it = mainTraj(); return !!it && !it.dtUser && !(it.traj && it.traj.dt_fs); };
 /** Time step field of the main trajectory: the value typed for it (it.dtUser), else its file's (traj.dt_fs, marked
- *  "from the file"), else empty. Called from summaries(), so it follows the trajectory shown. */
+ *  "from the file"), else DT0 (marked "assumed"). Called from summaries(), so it follows the trajectory shown. */
 function syncDt() {
-  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || "" : "";
+  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || DT0 : "";
   if (document.activeElement !== inp && String(inp.value) !== String(v)) inp.value = v;
-  $("an-dt-src").textContent = it && !it.dtUser && it.traj && it.traj.dt_fs ? "from the file" : "";
+  $("an-dt-src").textContent = !it || it.dtUser ? "" : it.traj && it.traj.dt_fs ? "from the file" : "assumed";
 }
 /** Opens the analysis window on tab kind and computes it. */
 function openAnalysis(kind) {
@@ -2633,7 +2640,9 @@ async function runAnalysis(quiet = false) {
   if ($("anwin").hidden) return;
   if (xrd && !it) { AN.res = null; $("an-keys").innerHTML = ""; $("an-res").textContent = ""; $("an-plot").innerHTML = '<div class="an-wait">X-ray diffraction needs a crystal (a structure with a cell).</div>'; return; }
   if (!it) return;
-  const dt_fs = anDt(), seq = ++AN.seq;
+  // WHY: an assumed step goes only to the per-frame quantities (the temperature needs one, and its note says it is
+  // assumed); the VDOS keeps its own marked 1 fs default, MSD and the XRD map stay in frames until a step is given
+  const dt_fs = dtAssumed() && AN.kind !== "frames" ? undefined : anDt(), seq = ++AN.seq;
   if (xrd) {
     const traj = !!it.traj && AN.x.mode !== "frame", o = { lambda: xrdLambda(), range: [AN.x.t0, AN.x.t1], fwhm: AN.x.fw };
     if (!quiet) { AN.res = null; $("an-res").textContent = ""; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">Computing…${traj ? " (every frame, up to 200)" : ""}</div>`; }
@@ -2822,7 +2831,10 @@ function anChart() {
     else panels.push({ series: [s], ylabel: q.t });
   }
   if (!have.length) lines.push("Not available for this file.");
-  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) {
+    lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+    if (dtAssumed()) lines.push(`temperature: the time step is assumed (${DT0} fs per frame); type the real one, as T scales with 1/Δt²`);
+  }
   else if (!r.temperature) lines.push("temperature: needs the time step (Trajectory panel)");
   return { panels, keys, xlabel: r.t ? "*t* (ps)" : "frame", text: lines.join("\n"), xname: r.t ? "t (ps)" : "frame" };
 }
@@ -2989,6 +3001,9 @@ document.addEventListener("click", e => { if (useOpen && !e.target.closest("#use
 document.addEventListener("keydown", e => { if (useOpen && e.key === "Escape") { e.stopPropagation(); showUse(null); } }, true);
 
 startWorker();
+// WHY: a canvas does not wait for a web font; once the label face has loaded, redraw the label atlas with it
+if (typeof document !== "undefined" && document.fonts && document.fonts.load) document.fonts.load(`600 16px ${css("--sans")}`)
+  .then(() => { if (R && S.layers.length) { S.atlas = atlasOf(atlasSpecies()); buildStructure(); } }, () => {});
 segState();
 // test hook (tests set globalThis.__isoviewTest before importing this module)
 if (globalThis.__isoviewTest) globalThis.__isoview = { S, SL, SV, AN, cam, serialize, savePhoto, requestRender, get disp() { return disp; }, get canvas() { return canvas; } };

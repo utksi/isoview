@@ -8,7 +8,9 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=35">
+<link rel="preload" href="fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/source-code-pro.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css?v=37">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -124,7 +126,7 @@
       <div class="row"><span class="lab">At the end</span><div class="seg" data-key="loop"><button type="button" value="loop">Loop</button><button type="button" value="bounce">Bounce</button><button type="button" value="once">Stop</button></div></div>
       <div class="spark" id="tr-spark" hidden><svg id="tr-svg" aria-label="Energy of each frame; click to go to a frame"></svg><div class="spark-r"><span id="tr-e-range"></span><span id="tr-e-now"></span></div></div>
       <div class="sub-h">Analysis</div>
-      <div class="row"><label class="lab" for="an-dt">Time step</label><div class="reps"><input type="number" id="an-dt" min="0" step="any" placeholder="?" aria-label="time between saved frames, fs"><span>fs per frame</span><em class="dt-src" id="an-dt-src"></em></div></div>
+      <div class="row"><label class="lab" for="an-dt">Time step</label><div class="reps"><input type="number" id="an-dt" min="0" step="any" placeholder="1" aria-label="time between saved frames, fs"><span>fs per frame</span><em class="dt-src" id="an-dt-src"></em></div></div>
       <div class="tool-row pad" id="an-open"><button type="button" data-an="rdf" title="Radial distribution function g(r), total and per element pair, with coordination numbers">RDF</button><button type="button" data-an="msd" title="Mean squared displacement per element and the diffusion coefficient">MSD</button><button type="button" data-an="vacf" title="Vibrational density of states from the velocity autocorrelation (needs the time step)">VDOS</button><button type="button" data-an="frames" title="Energy, temperature estimate, volume, density and cell lengths per frame">Per frame</button><button type="button" data-an="xrd" title="X-ray diffraction: of the frame shown, averaged over the frames, or as a map against time">XRD</button></div>
       <div class="sub-h">Movie</div>
       <div class="row"><span class="lab">Format</span><div class="seg" data-key="mfmt"><button type="button" value="gif">GIF</button><button type="button" value="video" id="mfmt-video">Video</button></div></div>
@@ -256,6 +258,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=35"></script>
+<script type="module" src="js/app.js?v=37"></script>
 </body>
 </html>

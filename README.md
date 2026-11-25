@@ -118,8 +118,9 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   from the velocity autocorrelation; and per-frame energy, temperature estimate, volume, density and cell lengths.
   Time-dependent results need the time between saved frames (Time step, in fs). It is filled in from VASP
   molecular dynamics (IBRION = 0: POTIM, in vasprun.xml and OUTCAR) and pw.x md output; other files do not store it,
-  and the value typed is kept with the trajectory. Without one, the VDOS is drawn for 1 fs per frame and says so (its
-  frequencies scale as 1 / time step); MSD stays in frames. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
+  and the value typed is kept with the trajectory. Without one, 1 fs per frame is assumed and marked so: the VDOS
+  frequencies scale as 1 / time step and the temperature estimate as 1 / time step²; MSD stays in frames until a
+  step is given. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
   quantities, drawn as panels over one time axis. Figures save as SVG or 600 dpi PNG, 3.5 in wide (one journal
   column), with only the curves shown, and the same curves as CSV; deleted atoms are left out. The window belongs to
   the scene: opening other files closes it.

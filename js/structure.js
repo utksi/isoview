@@ -14,8 +14,8 @@
  * themselves (Cs in Cs2AgInCl6, Li in LiFePO4), and kept when they do not (NaCl, CaF2, Li2O would otherwise show no
  * bonds at all). Neighbours are found with a cubic cell list of edge = the largest cutoff.
  */
-import { inv3, cartToFrac, fracToCart, det3 } from "./lattice.js?v=35";
-import { rcov } from "./elements.js?v=35";
+import { inv3, cartToFrac, fracToCart, det3 } from "./lattice.js?v=37";
+import { rcov } from "./elements.js?v=37";
 
 /** List of { el, x, y, z, src } with src the index of the atom in the structure. */
 export function displayAtoms(st, { reps = [1, 1, 1], boundary = true, eps = 1e-3, shift = [0, 0, 0], cart = [0, 0, 0] } = {}) {
