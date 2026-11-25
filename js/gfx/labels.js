@@ -12,11 +12,13 @@
  * Instance layout (44 B): centre f32x3, radius f32, rect f32x4, aspect f32, text rgba u8, halo rgba u8.
  */
 
-export function buildAtlas(strings, H = 112) {
+const SYSTEM = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+/** Atlas of `strings` drawn in weight 600 at 0.74 H px in the CSS font-family list `family`. */
+export function buildAtlas(strings, H = 112, family = SYSTEM) {
   const c = typeof document !== "undefined" ? document.createElement("canvas") : null;
   const ctx = c && c.getContext ? c.getContext("2d") : null;
   if (!ctx) return null;
-  const font = `600 ${Math.round(H * 0.74)}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+  const font = `600 ${Math.round(H * 0.74)}px ${family}`;
   ctx.font = font;
   const pad = Math.round(H * 0.22), W = 1024, rects = {};
   let x = 0, y = 0;

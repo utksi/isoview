@@ -19,8 +19,8 @@
  * added, hkl listed); peaks below 1e-3 of the strongest are dropped; scaled, the strongest is 100.
  * Profile: y(2theta) = sum_k I_k exp(-4 ln 2 (2theta - 2theta_k)^2 / w^2), w the full width at half maximum (deg).
  */
-import { inv3, cartToFrac, norm } from "./lattice.js?v=35";
-import { zOf } from "./elements.js?v=35";
+import { inv3, cartToFrac, norm } from "./lattice.js?v=36";
+import { zOf } from "./elements.js?v=36";
 
 /** Common X-ray tube lines (A), as pymatgen gives them (K alpha: the weighted K alpha1 / K alpha2 mean). */
 export const WAVELENGTHS = { "Cu Kα": 1.54184, "Mo Kα": 0.71073, "Co Kα": 1.79026, "Fe Kα": 1.93735, "Cr Kα": 2.291, "Ag Kα": 0.560885 };

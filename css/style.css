@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0. Copyright 2026 Utkarsh Singh. */
+/* Typefaces: Source Sans 3 for text, Source Code Pro for numbers and file names (fonts/, SIL OFL 1.1, subset and
+   renamed; fonts/README.md). The system faces stand in until they arrive. */
+@font-face { font-family: "isoview S3"; src: url("../fonts/source-sans-3.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "isoview SCP"; src: url("../fonts/source-code-pro.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
 /* isoview: a full-bleed viewer with one quiet panel of collapsible sections and small corner controls.
    Each corner group (title, panel, axes and cell, view buttons) has an eye at the very corner that tucks it away.
    Nothing scrolls sideways: rows shrink and wrap inside the panel width. */
@@ -8,8 +12,8 @@
   --accent: #3058d0; --accent-soft: rgba(48, 88, 208, 0.1); --pos: #e09a2d; --neg: #3a80c9; --cell: #8b919b;
   --ax-a: #cf574c; --ax-b: #3e9a59; --ax-c: #3d6fd1; --err: #c2413a; --sec-open: rgba(48, 88, 208, 0.045);
   --shadow: 0 1px 2px rgba(16, 18, 22, 0.06), 0 10px 30px rgba(16, 18, 22, 0.08);
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "isoview S3", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "isoview SCP", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
