@@ -2,9 +2,12 @@
 // Copyright 2026 Utkarsh Singh
 /**
  * Tests of js/slice.js: plane geometry (cross-section polygons of known shape and area), sampling accuracy on an
- * analytic periodic field, open grids, contours of a circle, colour-map end points. Run: node tests/slice.mjs
+ * analytic periodic field, open grids, contours of a circle, colour-map end points; colour-bar ticks (linear, signed,
+ * log, factored powers of ten) at the positions the colour scale gives their values; the figure layout (aspect kept,
+ * inside the padding, beside the bar, centred); the figure and colour bar drawn on a recording context.
+ * Run: node tests/slice.mjs
  */
-import { slicePlane, sampleSlice, contours, colormap } from "../js/slice.js";
+import { slicePlane, sampleSlice, contours, colormap, barTicks, figureLayout, drawFigure, drawColorBar, colorBarWidth, scaler } from "../js/slice.js";
 import { fromParams, norm, cross } from "../js/lattice.js";
 
 let pass = 0, fail = 0;
@@ -80,6 +83,41 @@ ok(seg.length / 4 > 100 && dev < 0.05, `circle contour: ${seg.length / 4} segmen
 const v0 = colormap("viridis", 0), v1 = colormap("viridis", 1), r5 = colormap("rdbu", 0.5);
 ok(Math.abs(v0[0] - 68) <= 4 && Math.abs(v0[2] - 84) <= 4 && Math.abs(v1[0] - 253) <= 4 && Math.abs(v1[1] - 231) <= 4 && Math.abs(v1[2] - 37) <= 5 && r5.join() === "247,247,247",
   `colour maps (the viridis fit is within 4 of the matplotlib table): viridis(0) ${v0}, viridis(1) ${v1}, RdBu(0.5) ${r5}`);
+
+// colour-bar ticks: each tick's position is the colour-scale position of its value
+const at = (mode, lo, hi) => { const t = barTicks(mode, lo, hi), sc = scaler(mode, lo, hi); return { ...t, err: Math.max(0, ...t.ticks.map(k => Math.abs(k.x - sc(k.v)))) }; };
+let b = at("lin", 0, 0.47);
+ok(b.ticks.map(t => t.text).join() === "0.0,0.1,0.2,0.3,0.4" && b.mult === "" && b.err < 1e-12, `linear [0, 0.47]: ${b.ticks.map(t => t.text)}`);
+b = at("signed", -0.8, 1.3);
+ok(b.ticks.map(t => t.text).join() === "−1.0,−0.5,0.0,0.5,1.0" && b.err < 1e-12 && b.ticks.find(t => t.v === 0).x === 0.5, `signed (m = 1.3): ${b.ticks.map(t => t.text)}, zero at the middle`);
+b = at("log", 2.5e-4, 0.25);
+ok(b.ticks.map(t => t.text).join() === "10⁻³,10⁻²,10⁻¹" && b.err < 1e-12, `log [2.5e-4, 0.25]: ${b.ticks.map(t => t.text)}`);
+b = at("log", 1e-9, 10);
+ok(b.ticks.length === 6 && b.ticks[0].text === "10⁻⁹" && b.ticks[1].text === "10⁻⁷", `log over 11 decades: every second (${b.ticks.map(t => t.text)})`);
+b = at("lin", 1e-5, 4.6e-5);
+ok(b.mult === "×10⁻⁵" && b.ticks.map(t => t.text).join() === "1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5" && b.err < 1e-12, `small values factored: ${b.mult} x ${b.ticks.map(t => t.text)}`);
+b = at("lin", -12000, 31000);
+ok(b.mult === "×10⁴" && b.ticks[0].text === "−1" && b.ticks.at(-1).text === "3", `large values factored: ${b.mult} x ${b.ticks.map(t => t.text)}`);
+// layout: a 2:1 figure in 1000 x 600 with padding 20 and a 100 px bar block
+let Lo = figureLayout(1000, 600, 2, [20, 20, 20, 20], 100, 0);
+ok(near(Lo.w / Lo.h, 2, 1e-12) && near(Lo.w, 860, 1e-9) && near(Lo.x, 20, 1e-9) && near(Lo.bx, 880, 1e-9) && Lo.y >= 20 - 1e-9 && Lo.y + Lo.h <= 580 + 1e-9 && near(Lo.bh, 0.8 * Lo.h, 1e-9),
+  `layout, width-limited: figure ${Lo.w} x ${Lo.h} at (${Lo.x}, ${Lo.y}), bar at ${Lo.bx}`);
+Lo = figureLayout(1000, 600, 0.5, [40, 20, 20, 20], 0, 0);
+ok(near(Lo.h, 540, 1e-9) && near(Lo.w, 270, 1e-9) && near(Lo.x + Lo.w / 2, 500, 1e-9) && near(Lo.y, 40, 1e-9), `layout, height-limited and centred: ${Lo.w} x ${Lo.h} at (${Lo.x}, ${Lo.y})`);
+Lo = figureLayout(800, 200, 8, [10, 10, 10, 10], 60, 120);
+ok(near(Lo.bh, 120, 1e-9) && Lo.by + Lo.bh <= 190 + 1e-9 && Lo.by >= 10 - 1e-9, `a flat figure keeps a readable bar: ${Lo.bh} px`);
+// drawing on a recording context: image first, contours, outline, atoms; bar, ticks, labels, title
+const calls = [], rec = new Proxy({ measureText: t => ({ width: 6 * String(t).length }), createLinearGradient: () => ({ addColorStop() {} }) }, {
+  get: (o, k) => (k in o ? o[k] : (...a) => calls.push([k, ...a])), set: (o, k, v) => { calls.push(["=" + k, v]); return true; } });
+const vals = new Float32Array(16 * 16).map((_, i) => Math.hypot((i % 16) - 7.5, Math.floor(i / 16) - 7.5));
+drawFigure(rec, 10, 20, 160, 160, { image: {}, values: vals, iw: 16, ih: 16, poly: [[0, 0], [1, 0], [1, 1], [0, 1]], levels: [3, 5], lines: true, atoms: [{ s: 0.5, r: 0.5, rad: 1, color: "#f00", w: 1 }], width: 8, k: 2 });
+const names = calls.map(c => c[0]), di = names.indexOf("drawImage"), st = names.lastIndexOf("stroke"), ar = names.indexOf("arc");
+ok(di >= 0 && names.indexOf("lineTo") > di && ar > names.indexOf("closePath") && calls[ar][3] === 20, `figure: image, then contours and outline, then atoms (radius 1 A = ${calls[ar] && calls[ar][3]} px at 20 px/A)`);
+calls.length = 0;
+const bt = barTicks("lin", 0, 1), bw = colorBarWidth(rec, 12, "sans-serif", bt, "density (e/Å³)");
+drawColorBar(rec, 500, 100, 300, { fs: 12, font: "sans-serif", ink: "#000", bt, map: "viridis", title: "density (e/Å³)", k: 1 });
+const texts = calls.filter(c => c[0] === "fillText").map(c => c[1]), fr = calls.find(c => c[0] === "fillRect");
+ok(texts.join() === "0.0,0.2,0.4,0.6,0.8,1.0,density (e/Å³)" && fr[1] > 500 && fr[4] === 300 && bw > 12 * 4, `colour bar: labels ${texts.slice(0, 6)}, title; block width ${bw.toFixed(1)} px`);
 
 console.log(`${pass}/${pass + fail} passed`);
 if (fail) process.exitCode = 1;

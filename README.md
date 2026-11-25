@@ -60,12 +60,17 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   density also the number of electrons there; a short note under it says how to read the level for that kind of
   field (density, signed field, potential, ELF).
   Signed fields show a positive and a negative surface.
-- **Slice** (Surface panel): a 2D cut through the field on any lattice plane (hkl), at a position set with a slider.
-  It shows in the scene as a coloured plane and in its own window (drag it by its top; it can be made larger) with
-  contour lines, the atoms within 0.8 Å of the plane and a colour bar: densities on a log scale over three decades,
-  signed fields (orbitals, magnetization) blue to red about zero, potentials and ELF linear (each can be changed).
-  The slice is sampled at four pixels per grid step with tricubic interpolation of the (already Fourier-refined)
-  grid, and saves as PNG (2000 px) or SVG (image, vector contour lines and atoms).
+- **Slice** (Surface panel): a 2D cut through the field on a lattice plane. The slice bar (bottom centre) picks
+  (100), (010) or (001) and moves the plane through the cell with a slider (its position as a fractional coordinate
+  and in Å); any plane (hkl) is set in the panel. The bar also chooses the main view, **3D** (the coloured plane in
+  the scene) or **2D** (the slice filling the window), the **inset** (the other view in a small box: drag its top
+  handle to move it, its corner to resize it, and turn the 3D view inside it) and the **colour bar** (beside the 2D
+  slice, or at the right of the 3D view alone). The 2D slice has contour lines, the atoms within 0.8 Å of the plane
+  and a colour bar with ticks and the field's unit: densities on a log scale over three decades, signed fields
+  (orbitals, magnetization) blue to red about zero, potentials and ELF linear (scale and colours can be changed in
+  the panel). It is sampled with tricubic interpolation of the (already Fourier-refined) grid, at four pixels per
+  grid step or finer when it is drawn large. Photo Mode saves the views as shown; the panel also saves the 2D slice
+  as SVG (image, vector contour lines, atoms and colour bar).
 - **Orbital** (WAVECAR): the band list marks occupied bands; arrow keys step through bands.
   Only the requested band is read from disk, so multi-gigabyte files open in seconds.
   **Add a band as a layer** (or Ctrl/⌘-click a band) shows several bands at once, for example a hole in spin ↓
@@ -148,7 +153,9 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   zoom to frame it, then **Save PNG** or **Copy** at the screen's size, 2× or 4× the window (up to 16 Mpx), on the
   theme's background, white, or transparent. Large images are drawn in tiles at twice the output size and
   averaged down; a transparent background comes from one render on black and one on white. In the Brillouin-zone
-  view the crystal inset is part of the photo. `Esc` or Done returns.
+  view the crystal inset is part of the photo. With a slice, the photo bar also switches the main view (3D or 2D),
+  the inset and the colour bar; the slice is sampled again for the output size, so contour lines stay smooth, and
+  its text is black on white or transparent photos. `Esc` or Done returns.
 - **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
   reload brings it back. Scenes up to 512 MB of files are kept whole; larger files come back as atoms only. **New
   scene** (top left) clears it, and can be undone.

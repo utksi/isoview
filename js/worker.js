@@ -12,10 +12,11 @@
  *   orbital { ds, slot, s, k, b, signed, half } -> { field: meta }  (becomes field `slot` of dataset ds)
  *   mesh { ds, fi, reps, stride, isos: [..], shift, cuts }
  *                                         -> { meshes: [{ positions, normals, indices, triangles, truncated }] }
- *   slice { ds, fi, cell, origin, hkl, t, px, maxSide, shift }
+ *   slice { ds, fi, cell, origin, hkl, t, px, fit, maxSide, maxPix, shift }
  *                                         -> { values (W x H, transferred), W, H, plane, min, max }: field fi on the
- *                                            (hkl) plane at position t of the cell (slice.js), px A per pixel (the
- *                                            long side capped at maxSide pixels)
+ *                                            (hkl) plane at position t of the cell (slice.js), px A per pixel or finer
+ *                                            so that the long side has at least fit pixels (when given); the long
+ *                                            side capped at maxSide pixels and W H at maxPix
  *   analysis { kind, structure, traj, opts } -> the result of analysis.js rdf / msd / vacf / perFrame (kind
  *                                            "rdf", "msd", "vacf", "frames") for that trajectory (sent each time)
  *   xrd { mode: "one", structure, opts }  -> xrd.js xrdPattern of the structure (opts: lambda, range, fwhm), its hkl
@@ -31,15 +32,15 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=32";
-import { isUlm, parseAseTraj } from "./traj.js?v=32";
-import { Wavecar } from "./wavecar.js?v=32";
-import { stats, renderGrid, refine } from "./field.js?v=32";
-import { marchingCubes } from "./gfx/mc.js?v=32";
-import { slicePlane, sampleSlice } from "./slice.js?v=32";
-import { rdf, msd, vacf, perFrame } from "./analysis.js?v=32";
-import { xrdPattern, xrdTrajectory } from "./xrd.js?v=32";
-import { conventional } from "./symmetry.js?v=32";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=33";
+import { isUlm, parseAseTraj } from "./traj.js?v=33";
+import { Wavecar } from "./wavecar.js?v=33";
+import { stats, renderGrid, refine } from "./field.js?v=33";
+import { marchingCubes } from "./gfx/mc.js?v=33";
+import { slicePlane, sampleSlice } from "./slice.js?v=33";
+import { rdf, msd, vacf, perFrame } from "./analysis.js?v=33";
+import { xrdPattern, xrdTrajectory } from "./xrd.js?v=33";
+import { conventional } from "./symmetry.js?v=33";
 
 const DS = new Map();
 let nextDs = 1;
@@ -145,8 +146,10 @@ export async function handle(msg) {
     const f = W.fields[msg.fi];
     if (!f) throw new Error("no field " + msg.fi);
     const P = slicePlane(msg.cell, msg.origin, msg.hkl, msg.t);
-    let w = Math.max(2, Math.ceil(P.width / msg.px)), h = Math.max(2, Math.ceil(P.height / msg.px));
-    const k = Math.min(1, msg.maxSide / Math.max(w, h));
+    // WHY: fit asks for at least that many pixels along the longer side (images drawn large: smooth contours)
+    const px = msg.fit ? Math.min(msg.px, Math.max(P.width, P.height) / msg.fit) : msg.px;
+    let w = Math.max(2, Math.ceil(P.width / px)), h = Math.max(2, Math.ceil(P.height / px));
+    const k = Math.min(1, msg.maxSide / Math.max(w, h), Math.sqrt((msg.maxPix || Infinity) / (w * h)));
     w = Math.max(2, Math.round(w * k)); h = Math.max(2, Math.round(h * k));
     const r = sampleSlice(f, P, w, h, msg.shift || [0, 0, 0]);
     return { result: { values: r.values, W: w, H: h, plane: P, min: r.min, max: r.max }, transfer: [r.values.buffer] };
@@ -157,8 +160,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=32").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=32", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=33").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=33", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;

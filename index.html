@@ -8,10 +8,11 @@
 <meta name="description" content="Visualize, edit and create crystal structures and volumetric data, in the browser: POSCAR, CIF, XSF, pw.in, cube, CHGCAR, LOCPOT, WAVECAR. Files are read locally and never uploaded.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=32">
+<link rel="stylesheet" href="css/style.css?v=33">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
+<canvas id="slv" aria-label="The 2D slice" hidden></canvas>
 <svg id="ov" aria-hidden="true"></svg>
 
 <header class="tl corner" id="tl">
@@ -88,7 +89,14 @@
       <div class="row col"><div class="lv"><label class="lab" for="iso">Level</label><input id="iso-num" class="num-in" inputmode="decimal" aria-label="isovalue" spellcheck="false"></div><input type="range" id="iso" min="0" max="1000" step="1"><div class="hint" id="iso-hint"></div><p class="note iso-note" id="iso-note"></p></div>
       <div class="row" id="row-pm"><label class="lab" for="pm">Negative lobe</label><input type="checkbox" class="sw" id="pm" checked></div>
       <div class="row"><label class="lab" for="opacity">Opacity</label><input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.85"></div>
-      <div class="row"><label class="lab" for="slice">Slice</label><input type="checkbox" class="sw" id="slice" title="A 2D cut through the field, in the scene and in its own window"></div>
+      <div class="row"><label class="lab" for="slice">Slice</label><input type="checkbox" class="sw" id="slice" title="A 2D cut through the field: a plane in the scene, a 2D view, an inset; moved with the slice bar"></div>
+      <div class="sl-panel" id="sl-panel" hidden>
+        <div class="row"><label class="lab" for="sl-hkl">Plane</label><input id="sl-hkl" class="num-in sl-hkl" value="0 0 1" spellcheck="false" aria-label="Miller indices h k l" title="Any plane: Miller indices h k l"></div>
+        <div class="row"><span class="lab">Scale</span><div class="seg2" id="sl-scale" role="group" aria-label="Scale"><button type="button" value="lin">linear</button><button type="button" value="log">log</button></div></div>
+        <div class="row"><label class="lab" for="sl-map">Colours</label><select id="sl-map"><option value="auto">auto</option><option value="viridis">viridis</option><option value="rdbu">RdBu</option><option value="grey">grey</option></select></div>
+        <div class="row"><span class="lab">Show</span><span class="sl-cks"><label class="sl-ck"><input type="checkbox" id="sl-iso" checked>lines</label><label class="sl-ck"><input type="checkbox" id="sl-atoms" checked>atoms</label><label class="sl-ck" title="The coloured plane in the 3D view"><input type="checkbox" id="sl-3d" checked>plane in 3D</label></span></div>
+        <div class="row-btns"><button type="button" id="sl-svg" class="ghost" title="The 2D slice as SVG: image, contour lines, atoms, colour bar (for editing in a drawing program)">Save the slice as SVG</button></div>
+      </div>
       <div class="row"><span class="lab">Resolution</span><div class="seg" data-key="res"><button type="button" value="auto">Auto</button><button type="button" value="1">Full</button><button type="button" value="2">½</button><button type="button" value="4">¼</button></div></div>
       <div class="stats" id="stats"></div>
     </div>
@@ -172,6 +180,7 @@
   <span class="ph-px" id="ph-px"></span>
   <span class="ph-lab">Background</span>
   <div class="seg2" id="ph-bg" role="group" aria-label="Background"><button type="button" value="scene">Theme</button><button type="button" value="white">White</button><button type="button" value="clear" title="Transparent PNG (shown here on the theme background)">Transparent</button></div>
+  <span class="ph-sl" id="ph-sl" hidden><span class="ph-lab">Slice</span><span class="seg2" id="ph-view" role="group" aria-label="Main view"><button type="button" value="3d">3D</button><button type="button" value="2d">2D</button></span><span class="seg2" id="ph-opts" role="group" aria-label="Slice extras"><button type="button" value="inset">Inset</button><button type="button" value="bar">Colour bar</button></span></span>
   <span class="ph-acts"><button type="button" class="ph-b" id="ph-copy" title="Copy the image">Copy</button><button type="button" class="ph-b strong" id="ph-save" title="Save the image as PNG (S)">Save PNG</button><button type="button" class="ph-b" id="ph-done" title="Leave photo mode (Esc)">Done</button></span>
 </div>
 <div class="bzinset glass" id="bzinset" hidden>
@@ -185,25 +194,21 @@
   <input type="range" id="pl-frame" min="0" max="0" step="1" value="0" aria-label="Frame">
   <span class="pl-n" id="pl-count">1 / 1</span>
 </div>
-<div class="slicewin glass" id="slicewin" role="dialog" aria-label="Slice" hidden>
-  <div class="sl-head" id="sl-head">
-    <div class="seg2" id="sl-planes" role="group" aria-label="Plane"><button type="button" value="1 0 0">(100)</button><button type="button" value="0 1 0">(010)</button><button type="button" value="0 0 1">(001)</button></div>
-    <input id="sl-hkl" class="sl-hkl" value="0 0 1" spellcheck="false" aria-label="Miller indices h k l" title="Any plane: Miller indices h k l">
-    <span class="sl-sp"></span>
-    <button type="button" class="sl-ic" id="sl-big" title="Larger" aria-label="Larger" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 13.5 10.5M4.5 19.5l6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <button type="button" class="sl-ic" id="sl-x" title="Close the slice" aria-label="Close the slice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
-  </div>
-  <div class="sl-pos"><input type="range" id="sl-t" min="0" max="1" step="0.0005" value="0.5" aria-label="Position of the plane"><span class="sl-d" id="sl-d"></span></div>
-  <div class="sl-fig"><canvas id="sl-cv" aria-label="The slice"></canvas><div class="sl-bar"><span id="sl-max"></span><canvas id="sl-cb" width="12" height="256" aria-hidden="true"></canvas><span id="sl-min"></span></div></div>
-  <div class="sl-opts">
-    <div class="seg2" id="sl-scale" role="group" aria-label="Scale"><button type="button" value="lin">lin</button><button type="button" value="log">log</button></div>
-    <select id="sl-map" aria-label="Colours"><option value="auto">auto</option><option value="viridis">viridis</option><option value="rdbu">RdBu</option><option value="grey">grey</option></select>
-    <label class="sl-ck"><input type="checkbox" id="sl-iso" checked>lines</label>
-    <label class="sl-ck"><input type="checkbox" id="sl-atoms" checked>atoms</label>
-    <label class="sl-ck"><input type="checkbox" id="sl-3d" checked>in 3D</label>
-    <span class="sl-sp"></span>
-    <button type="button" class="sl-save" id="sl-png" title="Save the slice as a PNG image">PNG</button><button type="button" class="sl-save" id="sl-svg" title="Save the slice as SVG (image, lines and atoms; for papers)">SVG</button>
-  </div>
+<div class="slicebar glass" id="slicebar" role="toolbar" aria-label="Slice" hidden>
+  <div class="seg2" id="sl-planes" role="group" aria-label="Plane"><button type="button" value="1 0 0" title="The plane (100), moved along a">(100)</button><button type="button" value="0 1 0" title="The plane (010), moved along b">(010)</button><button type="button" value="0 0 1" title="The plane (001), moved along c">(001)</button></div>
+  <input type="range" id="sl-t" min="0" max="1" step="0.0005" value="0.5" aria-label="Position of the plane in the cell">
+  <span class="sl-d" id="sl-d"></span>
+  <span class="sep"></span>
+  <div class="seg2" id="sl-view" role="group" aria-label="Main view"><button type="button" value="3d" title="The 3D scene as the main view">3D</button><button type="button" value="2d" title="The 2D slice as the main view">2D</button></div>
+  <button type="button" class="sl-ic" id="sl-inset" aria-pressed="true" title="Inset: the 2D slice beside the 3D view, or the 3D view beside the 2D slice" aria-label="Inset"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="5.8" y="11.6" width="7" height="5.2" rx="1" fill="currentColor"/></svg></button>
+  <button type="button" class="sl-ic" id="sl-bar" aria-pressed="true" title="Colour bar" aria-label="Colour bar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="3.8" width="5.4" height="16.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 15.5h5.4M7.5 11.5h5.4" stroke="currentColor" stroke-width="1.2" opacity="0.55"/><path d="M15.2 6h2.6M15.2 12h2.6M15.2 18h2.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  <button type="button" class="sl-ic" id="sl-x" title="Close the slice" aria-label="Close the slice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+</div>
+<div class="slinset glass" id="sli" hidden>
+  <canvas id="sli-cv" aria-label="The slice"></canvas>
+  <button type="button" class="sli-x" id="sli-x" title="Hide the inset" aria-label="Hide the inset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+  <div class="sli-move" id="sli-move" title="Drag to move" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M3 4h6M3 6h6M3 8h6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></div>
+  <div class="bzi-grip sli-grip" id="sli-grip" title="Drag to resize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2h8v8M6 2h4v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 </div>
 <div class="anwin glass" id="anwin" role="dialog" aria-label="Trajectory analysis" hidden>
   <div class="sl-head" id="an-head">
@@ -251,6 +256,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=32"></script>
+<script type="module" src="js/app.js?v=33"></script>
 </body>
 </html>
