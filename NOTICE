@@ -33,7 +33,9 @@ This product includes software from other projects, under their own licences:
   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
   OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-The typefaces in fonts/ (Inter and Source Code Pro, subset, the latter renamed as its licence
+The typefaces in fonts/ (Inter, Source Code Pro and, on the test site, Source Sans 3, IBM Plex
+Sans and Mono, Fira Sans and Mono, Lato, Noto Sans and Sans Mono, Open Sans, Roboto and
+Roboto Mono, Manrope, Commissioner, JetBrains Mono; subset, and renamed where their licence
 requires) are licensed under the SIL Open Font License 1.1, not the Apache License;
 the licence texts and sources are in fonts/README.md and fonts/OFL-*.txt.
 

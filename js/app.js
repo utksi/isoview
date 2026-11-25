@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=37";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=37";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=37";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=37";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=37";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=37";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=37";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=37";
-import { measureAll } from "./measure.js?v=37";
-import { GifWriter, buildPalette } from "./gif.js?v=37";
-import * as store from "./store.js?v=37";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=37";
-import { chart, toCSV } from "./plot.js?v=37";
-import { openPicker } from "./picker.js?v=37";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=37";
-import { colormap } from "./slice.js?v=37";
-import { wignerSeitz, kpath } from "./bz.js?v=37";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1003";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1003";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1003";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1003";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1003";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1003";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1003";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=1003";
+import { measureAll } from "./measure.js?v=1003";
+import { GifWriter, buildPalette } from "./gif.js?v=1003";
+import * as store from "./store.js?v=1003";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1003";
+import { chart, toCSV } from "./plot.js?v=1003";
+import { openPicker } from "./picker.js?v=1003";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=1003";
+import { colormap } from "./slice.js?v=1003";
+import { wignerSeitz, kpath } from "./bz.js?v=1003";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -163,7 +163,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=37", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1003", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1993,7 +1993,7 @@ if (store.CHANNEL) {
     const v = kind === "mono" && id === "text" ? "var(--sans)" : f ? `"${f.family}", ${SYS[kind]}` : SYS[kind];
     if (kind === "mono") document.documentElement.dataset.mono = id;
     document.documentElement.style.setProperty(kind === "text" ? "--sans" : "--mono", v);
-    if (kind === "text") document.body.style.fontFeatureSettings = id === "inter" ? '"cv05"' : ""; // Inter: l with a tail
+    if (kind === "text") document.body.style.fontFeatureSettings = id === "inter" ? '"cv05"' : "normal"; // Inter: l with a tail
     if (save) try { localStorage.setItem(store.PREFIX + "font-" + kind, id); } catch (e) { /* storage unavailable */ }
     if (document.fonts) document.fonts.load(`600 16px ${v.startsWith("var(") ? css("--sans") : v}`).then(() => { restyle(); if (R && S.layers.length) { S.atlas = atlasOf(atlasSpecies()); buildStructure(); } }, () => {});
   };
