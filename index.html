@@ -10,11 +10,12 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/source-code-pro.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css?v=1003">
+<link rel="stylesheet" href="css/style.css?v=1004">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
 <canvas id="slv" aria-label="The 2D slice" hidden></canvas>
+<div class="barh" id="sl-barh" title="Drag to move the colour bar; double-click to put it back" hidden></div>
 <svg id="ov" aria-hidden="true"></svg>
 
 <header class="tl corner" id="tl">
@@ -69,7 +70,7 @@
       <div class="row"><span class="lab">Style</span><div class="seg" data-key="style"><button type="button" value="ball">Ball</button><button type="button" value="space">Space</button><button type="button" value="stick">Stick</button><button type="button" value="off">Off</button></div></div>
       <div class="row col"><span class="lab">Look</span><div class="seg wide" data-key="look"><button type="button" value="classic" title="Lit spheres with a highlight">Classic</button><button type="button" value="soft" title="Soft light from above and depth fog, as in many papers">Soft</button><button type="button" value="glossy" title="Strong highlights and a bright rim">Glossy</button><button type="button" value="toon" title="Cartoon: three tones, a highlight dot and outlines">Toon</button><button type="button" value="outline" title="Flat colours with ink outlines, like a drawing">Outline</button></div></div>
       <div class="row"><label class="lab" for="scale">Size</label><input type="range" id="scale" min="0.3" max="2" step="0.05" value="1"></div>
-      <div class="row col" id="row-species" hidden><span class="lab">Show elements</span><div class="species" id="species"></div></div>
+      <div class="row col" id="row-species" hidden><span class="lab">Elements <span class="lab-hint">tick to show · click a colour to change it</span></span><div class="species" id="species"></div></div>
       <div class="row"><label class="lab" for="bonds">Bonds</label><input type="checkbox" class="sw" id="bonds" checked></div>
       <div class="row" id="row-tol"><label class="lab" for="tol">Bond reach</label><div class="pair"><input type="range" id="tol" min="0.8" max="1.6" step="0.01" value="1.15"><output id="tol-out" class="num">1.15</output><label class="keep" title="Keep this bond reach when you open another file (otherwise it returns to 1.15)"><input type="checkbox" id="tol-keep">keep</label></div></div>
       <div class="row has-cell"><label class="lab" for="cell">Cell</label><input type="checkbox" class="sw" id="cell" checked></div>
@@ -156,7 +157,7 @@
 
 <footer class="bl corner" id="bl" hidden>
   <svg id="triad" viewBox="-34 -34 68 68" aria-hidden="true"></svg>
-  <div id="info"></div>
+  <div class="bl-txt"><div class="elkey" id="elkey" aria-label="Element colours (click one to change it)" hidden></div><div id="info"></div></div>
 </footer>
 
 <div class="br glass corner" id="br" hidden>
@@ -182,7 +183,7 @@
   <span class="ph-px" id="ph-px"></span>
   <span class="ph-lab">Background</span>
   <div class="seg2" id="ph-bg" role="group" aria-label="Background"><button type="button" value="scene">Theme</button><button type="button" value="white">White</button><button type="button" value="clear" title="Transparent PNG (shown here on the theme background)">Transparent</button></div>
-  <span class="ph-sl" id="ph-sl" hidden><span class="ph-lab">Slice</span><span class="seg2" id="ph-view" role="group" aria-label="Main view"><button type="button" value="3d">3D</button><button type="button" value="2d">2D</button></span><span class="seg2" id="ph-opts" role="group" aria-label="Slice extras"><button type="button" value="inset">Inset</button><button type="button" value="bar">Colour bar</button></span></span>
+  <span class="ph-sl" id="ph-sl" hidden><span class="ph-lab">Slice</span><span class="seg2" id="ph-view" role="group" aria-label="Main view" title="The main view (the first one in side by side and stacked layouts)"><button type="button" value="3d">3D</button><button type="button" value="2d">2D</button></span><span class="seg2" id="ph-layout" role="group" aria-label="Layout"><button type="button" value="inset" title="The main view, the other one in a movable inset">Inset</button><button type="button" value="side" title="The two views side by side, the main one on the left">Side by side</button><button type="button" value="stack" title="The two views one above the other, the main one on top">Stacked</button></span><span class="seg2" id="ph-opts" role="group" aria-label="Slice extras"><button type="button" value="inset">Inset</button><button type="button" value="bar">Colour bar</button></span></span>
   <span class="ph-acts"><button type="button" class="ph-b" id="ph-copy" title="Copy the image">Copy</button><button type="button" class="ph-b strong" id="ph-save" title="Save the image as PNG (S)">Save PNG</button><button type="button" class="ph-b" id="ph-done" title="Leave photo mode (Esc)">Done</button></span>
 </div>
 <div class="bzinset glass" id="bzinset" hidden>
@@ -259,6 +260,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=1003"></script>
+<script type="module" src="js/app.js?v=1004"></script>
 </body>
 </html>

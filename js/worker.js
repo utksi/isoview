@@ -32,15 +32,15 @@
  * Gzip-compressed files (magic bytes 1f 8b, e.g. vasprun.xml.gz, CHGCAR.gz) are unpacked first with the browser's
  * DecompressionStream; the name loses its ".gz".
  */
-import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=1003";
-import { isUlm, parseAseTraj } from "./traj.js?v=1003";
-import { Wavecar } from "./wavecar.js?v=1003";
-import { stats, renderGrid, refine } from "./field.js?v=1003";
-import { marchingCubes } from "./gfx/mc.js?v=1003";
-import { slicePlane, sampleSlice } from "./slice.js?v=1003";
-import { rdf, msd, vacf, perFrame } from "./analysis.js?v=1003";
-import { xrdPattern, xrdTrajectory } from "./xrd.js?v=1003";
-import { conventional } from "./symmetry.js?v=1003";
+import { detectKind, parseText, isWavecarHeader } from "./formats.js?v=1004";
+import { isUlm, parseAseTraj } from "./traj.js?v=1004";
+import { Wavecar } from "./wavecar.js?v=1004";
+import { stats, renderGrid, refine } from "./field.js?v=1004";
+import { marchingCubes } from "./gfx/mc.js?v=1004";
+import { slicePlane, sampleSlice } from "./slice.js?v=1004";
+import { rdf, msd, vacf, perFrame } from "./analysis.js?v=1004";
+import { xrdPattern, xrdTrajectory } from "./xrd.js?v=1004";
+import { conventional } from "./symmetry.js?v=1004";
 
 const DS = new Map();
 let nextDs = 1;
@@ -160,8 +160,8 @@ export async function handle(msg) {
 /** moyo (WebAssembly), loaded on first use; in Node (tests) the .wasm file is read from disk. */
 let moyo = null;
 function moyoReady() {
-  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=1003").then(async m => {
-    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=1003", import.meta.url);
+  if (!moyo) moyo = import("./vendor/moyo/moyo_wasm.js?v=1004").then(async m => {
+    const url = new URL("./vendor/moyo/moyo_wasm_bg.wasm?v=1004", import.meta.url);
     const src = url.protocol === "file:" ? (await import("node:fs")).readFileSync(new URL(url.pathname, "file://")) : url;
     await m.default({ module_or_path: src });
     return m;
