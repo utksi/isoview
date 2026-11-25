@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=36";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=36";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=36";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=36";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=36";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=36";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=36";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=36";
-import { measureAll } from "./measure.js?v=36";
-import { GifWriter, buildPalette } from "./gif.js?v=36";
-import * as store from "./store.js?v=36";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=36";
-import { chart, toCSV } from "./plot.js?v=36";
-import { openPicker } from "./picker.js?v=36";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=36";
-import { colormap } from "./slice.js?v=36";
-import { wignerSeitz, kpath } from "./bz.js?v=36";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=37";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=37";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=37";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=37";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=37";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=37";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=37";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=37";
+import { measureAll } from "./measure.js?v=37";
+import { GifWriter, buildPalette } from "./gif.js?v=37";
+import * as store from "./store.js?v=37";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=37";
+import { chart, toCSV } from "./plot.js?v=37";
+import { openPicker } from "./picker.js?v=37";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=37";
+import { colormap } from "./slice.js?v=37";
+import { wignerSeitz, kpath } from "./bz.js?v=37";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -163,7 +163,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=36", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=37", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -2601,12 +2601,16 @@ function anData(it) {
   return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
 }
 const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
+// WHY: most MD codes write 0.5-2 fs steps; without a value the temperature and spectra could not be shown at all
+const DT0 = 1; // fs per saved frame assumed when neither the file nor the user gives one
+/** True when the main trajectory's time step is the assumed DT0 (no typed value, none in the file). */
+const dtAssumed = () => { const it = mainTraj(); return !!it && !it.dtUser && !(it.traj && it.traj.dt_fs); };
 /** Time step field of the main trajectory: the value typed for it (it.dtUser), else its file's (traj.dt_fs, marked
- *  "from the file"), else empty. Called from summaries(), so it follows the trajectory shown. */
+ *  "from the file"), else DT0 (marked "assumed"). Called from summaries(), so it follows the trajectory shown. */
 function syncDt() {
-  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || "" : "";
+  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || DT0 : "";
   if (document.activeElement !== inp && String(inp.value) !== String(v)) inp.value = v;
-  $("an-dt-src").textContent = it && !it.dtUser && it.traj && it.traj.dt_fs ? "from the file" : "";
+  $("an-dt-src").textContent = !it || it.dtUser ? "" : it.traj && it.traj.dt_fs ? "from the file" : "assumed";
 }
 /** Opens the analysis window on tab kind and computes it. */
 function openAnalysis(kind) {
@@ -2626,7 +2630,9 @@ async function runAnalysis(quiet = false) {
   if ($("anwin").hidden) return;
   if (xrd && !it) { AN.res = null; $("an-keys").innerHTML = ""; $("an-res").textContent = ""; $("an-plot").innerHTML = '<div class="an-wait">X-ray diffraction needs a crystal (a structure with a cell).</div>'; return; }
   if (!it) return;
-  const dt_fs = anDt(), seq = ++AN.seq;
+  // WHY: an assumed step goes only to the per-frame quantities (the temperature needs one, and its note says it is
+  // assumed); the VDOS keeps its own marked 1 fs default, MSD and the XRD map stay in frames until a step is given
+  const dt_fs = dtAssumed() && AN.kind !== "frames" ? undefined : anDt(), seq = ++AN.seq;
   if (xrd) {
     const traj = !!it.traj && AN.x.mode !== "frame", o = { lambda: xrdLambda(), range: [AN.x.t0, AN.x.t1], fwhm: AN.x.fw };
     if (!quiet) { AN.res = null; $("an-res").textContent = ""; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">Computing…${traj ? " (every frame, up to 200)" : ""}</div>`; }
@@ -2815,7 +2821,10 @@ function anChart() {
     else panels.push({ series: [s], ylabel: q.t });
   }
   if (!have.length) lines.push("Not available for this file.");
-  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) {
+    lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+    if (dtAssumed()) lines.push(`temperature: the time step is assumed (${DT0} fs per frame); type the real one, as T scales with 1/Δt²`);
+  }
   else if (!r.temperature) lines.push("temperature: needs the time step (Trajectory panel)");
   return { panels, keys, xlabel: r.t ? "*t* (ps)" : "frame", text: lines.join("\n"), xname: r.t ? "t (ps)" : "frame" };
 }
