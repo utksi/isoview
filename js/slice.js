@@ -35,7 +35,7 @@
  * Linear labels whose largest magnitude has exponent e <= -3 or e >= 4 are written as v / 10^e with "x10^e" once
  * above the bar.
  */
-import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=37";
+import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=38";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -260,24 +260,39 @@ export function figureLayout(W, H, aspect, pad, barW = 0, minBar = 0, centerFig 
   return { x, y, w, h, bx: x + w, by: y + (h - bh) / 2, bh };
 }
 /**
- * The figure centred in a W x H box (figureLayout with centerFig) and clear of the rectangle avoid = { x, y, w, h }
- * (an inset; null: none) with a gap. When the figure or its bar block overlaps it, the padding on the inset's side
- * grows to its inner edge, either sideways (left or right) or up or down; the choice with the larger figure is taken
- * and the figure stays centred. When that figure would have less than a third of the unobstructed area, the overlap
- * is kept.
+ * The figure and its colour bar in a W x H box, clear of the rectangles avoid ({ x, y, w, h }, one, a list or null:
+ * panels and insets over the view) by at least gap. Two candidates:
+ *   A  the figure centred on the box centre, at the largest height h <= h0 (the unobstructed centred height of
+ *      figureLayout with centerFig) for which neither the figure nor its bar block meets a rectangle; found by
+ *      bisection on h (a centred rectangle only grows with h, so "clear" holds on an interval [0, h_max]);
+ *   B  the figure and bar centred as a pair in the band between the rectangles on the left half and those on the
+ *      right half (each taken over the full height), as large as fits there.
+ * A is taken unless its height is under 0.4 h0 (and B is clear): the figure stays centred on the window, as wanted,
+ * and moves into the free band only when a panel would leave a centred figure too small to read (narrow windows).
  */
 export function layoutClear(W, H, aspect, pad, barW, minBar, avoid, gap = 0) {
   const L0 = figureLayout(W, H, aspect, pad, barW, minBar, true);
-  if (!avoid) return L0;
-  const over = (x, y, w, h) => x < avoid.x + avoid.w && avoid.x < x + w && y < avoid.y + avoid.h && avoid.y < y + h;
+  const rects = (Array.isArray(avoid) ? avoid : avoid ? [avoid] : []).filter(R => R && R.w > 0 && R.h > 0)
+    .map(R => ({ x: R.x - gap, y: R.y - gap, w: R.w + 2 * gap, h: R.h + 2 * gap }));
+  if (!rects.length) return L0;
+  const over = (x, y, w, h) => rects.some(R => x < R.x + R.w && R.x < x + w && y < R.y + R.h && R.y < y + h);
   const hit = L => over(L.x, L.y, L.w, L.h) || (barW > 0 && over(L.bx, L.by, barW, L.bh));
   if (!hit(L0)) return L0;
-  const [t, r, b, l] = pad, left = avoid.x + avoid.w / 2 < W / 2, low = avoid.y + avoid.h / 2 > H / 2;
-  const side = left ? [t, r, b, Math.max(l, avoid.x + avoid.w + gap)] : [t, Math.max(r, W - avoid.x + gap), b, l];
-  const vert = low ? [t, r, Math.max(b, H - avoid.y + gap), l] : [Math.max(t, avoid.y + avoid.h + gap), r, b, l];
-  const best = [figureLayout(W, H, aspect, side, barW, minBar, true), figureLayout(W, H, aspect, vert, barW, minBar, true)]
-    .filter(L => !hit(L)).sort((p, q) => q.w * q.h - p.w * p.h)[0];
-  return best && best.w * best.h >= L0.w * L0.h / 3 ? best : L0;
+  // A: a layout of figure height h centred on the box centre, with the bar block on its right
+  const at = h => {
+    const w = h * aspect, x = (W - w) / 2, y = (H - h) / 2, bh = Math.min(H - pad[0] - pad[2], Math.max(0.8 * h, minBar));
+    return { x, y, w, h, bx: x + w, by: y + (h - bh) / 2, bh };
+  };
+  let lo = 0, hi = L0.h;
+  for (let it = 0; it < 40; it++) { const m = (lo + hi) / 2; if (hit(at(m))) hi = m; else lo = m; }
+  const A = lo > 0 ? at(lo) : null;
+  // B: centred in the free band between the left and the right rectangles
+  let l = pad[3], r = W - pad[1];
+  for (const R of rects) { if (R.x + R.w / 2 < W / 2) l = Math.max(l, R.x + R.w); else r = Math.min(r, R.x); }
+  const B = r - l > 1 ? figureLayout(W, H, aspect, [pad[0], W - r, pad[2], l], barW, minBar, false) : null;
+  const okB = B && !hit(B);
+  if (A && (!okB || A.h >= 0.4 * L0.h)) return A;
+  return okB ? B : L0;
 }
 
 // contour segments per image (values array) and level, so that redraws (colours, theme, resizing) reuse them

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0. Copyright 2026 Utkarsh Singh. */
-/* Typefaces: Inter for text, Source Code Pro for numbers and file names (fonts/, SIL OFL 1.1, subset; Source Code
-   Pro renamed as its licence requires; fonts/README.md). The system faces stand in until they arrive. */
+/* Typefaces: Inter for everything shown, numbers and file names included (--mono is --sans, with tabular figures);
+   Source Code Pro (--code) only for code snippets and text aligned in columns. fonts/, SIL OFL 1.1, subset, Source
+   Code Pro renamed as its licence requires (fonts/README.md). The system faces stand in until they arrive. */
 @font-face { font-family: "Inter"; src: url("../fonts/inter.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
 @font-face { font-family: "isoview SCP"; src: url("../fonts/source-code-pro.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
 /* isoview: a full-bleed viewer with one quiet panel of collapsible sections and small corner controls.
@@ -13,7 +14,8 @@
   --ax-a: #cf574c; --ax-b: #3e9a59; --ax-c: #3d6fd1; --err: #c2413a; --sec-open: rgba(48, 88, 208, 0.045);
   --shadow: 0 1px 2px rgba(16, 18, 22, 0.06), 0 10px 30px rgba(16, 18, 22, 0.08);
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: "isoview SCP", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --mono: var(--sans);
+  --code: "isoview SCP", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -36,7 +38,8 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 /* WHY: Inter's cv05 gives l a tail, so element symbols such as Cl never read as CI */
-body { background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); font-feature-settings: "cv05"; overflow: hidden; }
+/* WHY: tabular (equal-width) figures, so numbers line up and readouts do not jitter as they change */
+body { background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); font-feature-settings: "cv05"; font-variant-numeric: tabular-nums; overflow: hidden; }
 [hidden] { display: none !important; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -203,7 +206,7 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .use-pop p { margin: 8px 0 4px; line-height: 1.45; }
 .use-pop .lbl { margin: 12px 0 4px; font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink3); }
 .code { position: relative; }
-.code pre { margin: 0; padding: 9px 34px 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--hover); font: 11.5px/1.55 var(--mono); color: var(--ink); white-space: pre-wrap; word-break: break-all; }
+.code pre { margin: 0; padding: 9px 34px 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--hover); font: 11.5px/1.55 var(--code); color: var(--ink); white-space: pre-wrap; word-break: break-all; }
 .code .copy { position: absolute; top: 5px; right: 5px; border: 0; background: none; color: var(--ink3); padding: 4px; border-radius: 6px; display: inline-flex; }
 .code .copy:hover { color: var(--ink); background: var(--hover); }
 .code .copy svg { width: 15px; height: 15px; }
@@ -241,9 +244,25 @@ body.has-slicebar .bl { max-width: calc(50vw - 280px - 58px); }
 .sli-x:hover, .sli-move:hover { color: var(--ink); background: var(--hover); border-radius: 6px; }
 .sli-grip { z-index: 1; }
 .slinset:hover .sli-grip { opacity: 1; }
-body.photo .sli-x, body.photo .sli-move, body.photo .sli-grip { display: none; }
+/* Photo Mode: the inset still moves and resizes (its handles are not in the image); only closing it is left out */
+body.photo .sli-x { display: none; }
+/* a split layout: the 3D view fills its pane, without the inset's frame and handles */
+.slinset.pane { border: 0; border-radius: 0; box-shadow: none; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.slinset.pane .sli-x, .slinset.pane .sli-move, .slinset.pane .sli-grip { display: none; }
+/* the colour bar's drag handle, over the bar drawn on #slv */
+.barh { position: fixed; z-index: 3; cursor: move; touch-action: none; border-radius: 4px; }
+.barh:hover { outline: 1px dashed var(--accent); outline-offset: 3px; }
+/* the element key in the view's corner: a swatch per element, a click changes its colour */
+.bl-txt { display: grid; gap: 2px; min-width: 0; }
+.elkey { display: flex; flex-wrap: wrap; gap: 2px 4px; pointer-events: auto; }
+.elkey .ek { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 2px 6px 2px 3px; border-radius: 999px; font: 600 12px var(--sans); color: var(--ink2); }
+.elkey .ek:hover, .elkey .ek[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.elkey .dot, .species .sp-c .dot { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.22); position: relative; flex: none; }
+.elkey .ek:hover .dot, .species .sp-c:hover .dot { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.22), 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent); }
+.lab-hint { font-size: 11px; color: var(--ink3); margin-left: 6px; font-weight: 400; }
+body.photo .elkey { display: none; }
 #slv { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; display: block; pointer-events: none; }
-body.sl-2d #slv { pointer-events: auto; cursor: default; }
+body.sl-2d #slv, body.sl-split #slv { pointer-events: auto; cursor: default; }
 body.sl-2d #ov { display: none; }
 .sl-panel .row { min-height: 30px; }
 .sl-cks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
@@ -284,7 +303,7 @@ body.sl-2d #ov { display: none; }
 .an-keys button[aria-pressed="false"] { color: var(--ink3); border-style: dashed; }
 .an-keys button[aria-pressed="false"] i { opacity: 0.3; }
 .an-keys button:hover { border-color: var(--ink3); }
-.an-res { margin: 0; font: 11.5px/1.5 var(--mono); color: var(--ink2); white-space: pre-wrap; }
+.an-res { margin: 0; font: 11.5px/1.5 var(--code); color: var(--ink2); white-space: pre-wrap; }
 .an-res:empty { display: none; }
 .an-opts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .an-opts input[type="number"] { width: 58px; padding: 1px 4px; border: 1px solid var(--line2); border-radius: 6px; background: var(--solid); font-size: 11.5px; }
@@ -544,7 +563,9 @@ body.has-player #toast { bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 /* photo mode: only the view and the photo bar */
 body.photo .tl, body.photo .dock, body.photo .br, body.photo .bl, body.photo .player, body.photo .pill, body.photo .slicebar, body.photo .anwin,
 body.photo .corner-eye, body.photo #ov, body.photo .use-pop, body.photo #labelbar { display: none !important; }
-body.photo .bzi-x, body.photo .bzi-grip { display: none; }
+/* Photo Mode: the crystal inset still moves and resizes (handles are not in the image); only closing it is left out */
+body.photo .bzi-x { display: none; }
+.bzinset:hover .sli-move { opacity: 1; }
 .photobar { position: fixed; z-index: 6; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; padding: 6px 8px 6px 14px; border-radius: 12px;
   font-size: 12px; color: var(--ink2); max-width: calc(100vw - 24px); }
@@ -583,3 +604,35 @@ body.photo .bzi-x, body.photo .bzi-grip { display: none; }
 .cp-def { border: 1px solid var(--line2); background: none; color: var(--ink2); padding: 4px 9px; border-radius: 7px; font-size: 12px; }
 .cp-def:hover:not(:disabled) { color: var(--ink); border-color: var(--ink3); }
 .cp-def:disabled { opacity: 0.45; }
+
+/* test site only (store.js CHANNEL): typeface pickers and a frame readout, in a bar above the view buttons.
+   Typefaces: fonts/, SIL Open Font License 1.1, subset to the characters isoview prints and renamed where the licence
+   reserves the name (fonts/README.md). A face is downloaded only when it is chosen. */
+@font-face { font-family: "isoview S3"; src: url("../fonts/source-sans-3.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "isoview PX"; src: url("../fonts/ibm-plex-sans.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("../fonts/fira-sans-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("../fonts/fira-sans-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("../fonts/fira-sans-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "isoview LT"; src: url("../fonts/lato-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "isoview LT"; src: url("../fonts/lato-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "isoview LT"; src: url("../fonts/lato-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Noto Sans"; src: url("../fonts/noto-sans.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Open Sans"; src: url("../fonts/open-sans.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Roboto"; src: url("../fonts/roboto.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Manrope"; src: url("../fonts/manrope.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Commissioner"; src: url("../fonts/commissioner.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/jetbrains-mono.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "isoview PXM"; src: url("../fonts/ibm-plex-mono-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "isoview PXM"; src: url("../fonts/ibm-plex-mono-500.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "Fira Mono"; src: url("../fonts/fira-mono-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Fira Mono"; src: url("../fonts/fira-mono-500.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "Noto Sans Mono"; src: url("../fonts/noto-sans-mono.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Roboto Mono"; src: url("../fonts/roboto-mono.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+.testbar { position: fixed; z-index: 6; right: calc(46px + env(safe-area-inset-right, 0px)); bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 10px; border-radius: 10px; max-width: calc(100vw - 32px); font-size: 12px; }
+.testbar .tb-k { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.testbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); white-space: nowrap; }
+.testbar select { width: auto; max-width: 190px; }
+.testbar .tb-perf { font: 11.5px var(--mono); color: var(--ink2); white-space: nowrap; }
+.testbar a { color: var(--ink2); white-space: nowrap; }
+body.photo .testbar { display: none; }

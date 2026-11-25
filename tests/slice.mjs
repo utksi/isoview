@@ -115,8 +115,16 @@ ok(hits(Lo, inset), "unobstructed, the centred figure would run under a 240 px i
 const Lc = layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, inset, 16);
 ok(!hits(Lc, inset) && !hits({ x: Lc.bx, y: Lc.by, w: 90, h: Lc.bh }, inset) && near(Lc.x + Lc.w / 2, 600, 1e-9) && near(Lc.y + Lc.h / 2, 400, 1e-9) && near(Lc.w, 2 * (600 - (46 + 240 + 16)), 1e-9),
   `kept clear of the inset and still centred: ${Lc.w.toFixed(0)} x ${Lc.h.toFixed(0)} at (${Lc.x.toFixed(0)}, ${Lc.y.toFixed(0)})`);
-ok(layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, { x: 1000, y: 20, w: 60, h: 60 }, 16).w === Lo.w && layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, { x: 500, y: 300, w: 200, h: 200 }, 16).w === Lo.w,
-  "an inset out of the way changes nothing; one in the middle is overlapped rather than shrinking the figure to nothing");
+const mid = { x: 500, y: 300, w: 200, h: 200 }, Lm = layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, mid, 16);
+ok(layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, { x: 1000, y: 20, w: 60, h: 60 }, 16).w === Lo.w && !hits(Lm, mid) && Lm.w > 300,
+  `an inset out of the way changes nothing; one over the centre moves the figure into the free band (${Lm.w.toFixed(0)} px at x ${Lm.x.toFixed(0)})`);
+// a panel at the right (the dock) and the inset at the bottom left: figure and bar clear both
+const dock = { x: 828, y: 12, w: 332, h: 520 }, Ld = layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, [dock, inset], 16), barOf = L => ({ x: L.bx, y: L.by, w: 90, h: L.bh });
+ok(!hits(Ld, dock) && !hits(barOf(Ld), dock) && !hits(Ld, inset) && Ld.w > 200, `clear of panel and inset: ${Ld.w.toFixed(0)} x ${Ld.h.toFixed(0)} at (${Ld.x.toFixed(0)}, ${Ld.y.toFixed(0)})`);
+const wide = layoutClear(1600, 900, 1.6, [76, 28, 76, 28], 90, 0, [{ x: 1220, y: 12, w: 332, h: 800 }], 16);
+ok(near(wide.x + wide.w / 2, 800, 1e-6) && wide.bx + 90 <= 1220 - 16 + 1e-6, `a wide window keeps the figure centred and the bar left of the panel: ${wide.w.toFixed(0)} px, bar ends at ${(wide.bx + 90).toFixed(0)}`);
+const narrow = layoutClear(900, 800, 1.6, [76, 28, 76, 28], 90, 0, [{ x: 554, y: 12, w: 332, h: 780 }], 16);
+ok(!hits(narrow, { x: 554, y: 12, w: 332, h: 780 }) && narrow.x + narrow.w / 2 < 450, `a narrow window moves the figure into the free band: ${narrow.w.toFixed(0)} px centred at ${(narrow.x + narrow.w / 2).toFixed(0)}`);
 // drawing on a recording context: image first, contours, outline, atoms; bar, ticks, labels, title
 const calls = [], rec = new Proxy({ measureText: t => ({ width: 6 * String(t).length }), createLinearGradient: () => ({ addColorStop() {} }) }, {
   get: (o, k) => (k in o ? o[k] : (...a) => calls.push([k, ...a])), set: (o, k, v) => { calls.push(["=" + k, v]); return true; } });

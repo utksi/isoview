@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=37";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=37";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=37";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=37";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=37";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=37";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=37";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=37";
-import { measureAll } from "./measure.js?v=37";
-import { GifWriter, buildPalette } from "./gif.js?v=37";
-import * as store from "./store.js?v=37";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=37";
-import { chart, toCSV } from "./plot.js?v=37";
-import { openPicker } from "./picker.js?v=37";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=37";
-import { colormap } from "./slice.js?v=37";
-import { wignerSeitz, kpath } from "./bz.js?v=37";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=38";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=38";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=38";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=38";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=38";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=38";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=38";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=38";
+import { measureAll } from "./measure.js?v=38";
+import { GifWriter, buildPalette } from "./gif.js?v=38";
+import * as store from "./store.js?v=38";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=38";
+import { chart, toCSV } from "./plot.js?v=38";
+import { openPicker } from "./picker.js?v=38";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=38";
+import { colormap } from "./slice.js?v=38";
+import { wignerSeitz, kpath } from "./bz.js?v=38";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -93,16 +93,22 @@ const S = {
 const SL_NEAR = 0.8; // A: atoms closer than this to the plane are drawn on the slice
 const SL = { on: false, hkl: [0, 0, 1], t: 0.5, scale: "auto", map: "auto", iso: true, atoms: true, in3d: true, img: null, style: null, key: "", busy: false, again: null, fine: null };
 // view: main "3d" or "2d", inset and colour bar on or off, inset size (CSS px, its longer side) and position
-// ([left, bottom] CSS px, null: the default corner); the last three are kept in this browser
-const SV = { main: "3d", inset: true, bar: true, size: 240, pos: null };
+// ([left, bottom] CSS px, null: the default corner); Photo Mode layout ("inset", "side": side by side, "stack": one
+// above the other, the main view first); colour bar positions, one per place it can stand ("view": the window,
+// "pane": the 2D pane of a split layout, "inset": the slice inset), each the fractions [x, y] of that box of the
+// bar's top left corner (absent: next to the figure, or at the right of the 3D view). All but main are kept.
+const SV = { main: "3d", inset: true, bar: true, size: 240, pos: null, layout: "inset", barPos: {} };
 try {
   const v = JSON.parse(localStorage.getItem(store.PREFIX + "slice") || "{}");
   if (typeof v.inset === "boolean") SV.inset = v.inset;
   if (typeof v.bar === "boolean") SV.bar = v.bar;
   if (v.size >= 120) SV.size = v.size;
   if (Array.isArray(v.pos) && v.pos.every(Number.isFinite)) SV.pos = v.pos;
+  if (["inset", "side", "stack"].includes(v.layout)) SV.layout = v.layout;
+  const okPos = p => Array.isArray(p) && p.length === 2 && p.every(x => x >= 0 && x <= 1);
+  if (v.barPos && typeof v.barPos === "object") for (const k of ["view", "pane", "inset"]) if (okPos(v.barPos[k])) SV.barPos[k] = v.barPos[k];
 } catch (e) { /* storage unavailable */ }
-const saveSV = () => { try { localStorage.setItem(store.PREFIX + "slice", JSON.stringify({ inset: SV.inset, bar: SV.bar, size: SV.size, pos: SV.pos })); } catch (e) { /* storage unavailable */ } };
+const saveSV = () => { try { localStorage.setItem(store.PREFIX + "slice", JSON.stringify({ inset: SV.inset, bar: SV.bar, size: SV.size, pos: SV.pos, layout: SV.layout, barPos: SV.barPos })); } catch (e) { /* storage unavailable */ } };
 const SL_FS = 12, SL_FS_INSET = 10; // CSS px: colour-bar text in the main view and in the inset
 const TOL0 = 1.15; // default bond reach: bonded when d < reach (R1 + R2)
 // render looks (shaders.js): [mode, outline width in CSS px, depth-fog strength]
@@ -163,7 +169,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=37", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=38", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -223,9 +229,21 @@ function uniformsFor(c, r, w, h, bg = pal.bg, dpr = w / c.w, tile = null) {
 function frame() {
   dirty = false;
   if (!R) return;
+  if (fitClear) { fitClear = false; clearOfPanels(); }
+  const t0 = store.CHANNEL ? performance.now() : 0;
   if (view3dShown()) R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
   if (S.bz && BZI.R && !$("bzinset").hidden) drawInset();
   drawOverlay(); drawTriad();
+  if (store.CHANNEL) perfTick(t0);
+}
+// test site: frames drawn in the last second and the main-thread time of the last frame (ms; GPU work not included)
+const PERF = { times: [], shown: 0 };
+function perfTick(t0) {
+  const t = performance.now(), q = PERF.times;
+  q.push(t); while (q.length && q[0] < t - 1000) q.shift();
+  if (t - PERF.shown < 250) return;
+  PERF.shown = t;
+  $("tb-perf").textContent = `${R.name} · ${canvas.width}×${canvas.height} · ${q.length} fps · ${(t - t0).toFixed(1)} ms`;
 }
 
 /* ------------------------------------------------------------------ atoms, bonds, cells */
@@ -316,7 +334,7 @@ function buildStructure() {
 /** New colours without rebuilding the scene (live while a colour picker is open): atoms, bonds, labels, the element
  *  swatches, the slice window; in the Brillouin-zone view, the crystal inset. */
 function recolor() {
-  for (const b of document.querySelectorAll("#species .sp-c")) b.querySelector(".dot").style.background = elColor(b.dataset.el);
+  for (const b of document.querySelectorAll("#species .sp-c, #elkey .ek")) b.querySelector(".dot").style.background = elColor(b.dataset.el);
   if (!R) return;
   if (S.bz) { buildInset(); requestRender(); return; }
   for (const a of disp.atoms) { const L = layerById(a.layer); if (L) a.color = atomColor(L, a); }
@@ -339,8 +357,12 @@ function speciesUI() {
   box.innerHTML = els.map(e => {
     const x = esc(e);
     return `<span class="sp"><input type="checkbox" data-el="${x}"${S.hide.has(e) ? "" : " checked"} title="${S.hide.has(e) ? "Show" : "Hide"} the ${x} atoms" aria-label="Show ${x}">` +
-      `<button type="button" class="sp-c" data-el="${x}" title="Colour of the ${x} atoms" aria-haspopup="dialog"><span class="dot" style="background:${elColor(e)}"></span>${x}<em>${count.get(e)}</em></button></span>`;
+      `<button type="button" class="sp-c" data-el="${x}" title="Change the colour of the ${x} atoms" aria-haspopup="dialog"><span class="dot" style="background:${elColor(e)}"></span>${x}<em>${count.get(e)}</em></button></span>`;
   }).join("");
+  // the element key in the view's corner: one swatch per element shown, each opens the colour picker
+  $("elkey").innerHTML = els.filter(e => !S.hide.has(e)).map(e => { const x = esc(e);
+    return `<button type="button" class="ek" data-el="${x}" title="Change the colour of the ${x} atoms" aria-haspopup="dialog"><span class="dot" style="background:${elColor(e)}"></span>${x}</button>`; }).join("");
+  $("elkey").hidden = els.length === 0;
 }
 function uploadAtoms() {
   if (S.bz) return;
@@ -410,7 +432,79 @@ function rows(toward, up) {
   const u = norm(u0) > 1e-6 ? unit(u0) : unit(cross(t, Math.abs(t[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
   return [cross(u, t), u, t];
 }
-function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); }
+/** Frames the scene sphere (c, r) in the view and, once the panels are laid out, keeps it clear of them (fitClear).
+ *  Camera.fit uses the vertical field of view; a view narrower than tall (a side-by-side pane, a phone) needs the
+ *  horizontal one, tan(fx / 2) = a tan(fy / 2) with a = width / height: perspective d >= 1.08 r / sin(fx / 2),
+ *  orthographic (half-width d tan(fy / 2) a) d >= 1.08 r / (a tan(fy / 2)). */
+function fit() {
+  const s = sceneSphere(); cam.fit(s.c, s.r);
+  const a = cam.w / cam.h, t = Math.tan(cam.fovy / 2);
+  if (a < 1) cam.dist = Math.max(cam.dist, cam.ortho ? 1.08 * cam.radius / (a * t) : 1.08 * cam.radius / Math.sin(Math.atan(a * t)));
+  fitClear = true;
+}
+/** Boxes (CSS px, { x, y, w, h }, clipped to the window) of the panels over the view: the panel at the right, the
+ *  slice inset, the Brillouin-zone inset and the analysis window; hidden and tucked ones are left out. None in Photo
+ *  Mode, where the photo lays out its own inset. */
+function viewObstacles() {
+  if (PH.on) return [];
+  const out = [], W = window.innerWidth, H = window.innerHeight;
+  for (const id of ["dock", "sli", "bzinset", "anwin"]) {
+    const el = $(id);
+    if (!el || el.hidden || el.classList.contains("tucked")) continue;
+    const r = id === "sli" ? insetBox() : el.getBoundingClientRect(), x = r.x ?? r.left, y = r.y ?? r.top;
+    const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(W, x + (r.w ?? r.width)), y1 = Math.min(H, y + (r.h ?? r.height));
+    if (x1 > x0 && y1 > y0) out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+  }
+  return out;
+}
+let fitClear = false; // set by fit(): the next frame moves the camera back, if needed, so that panels do not cover the scene
+/**
+ * After a fit, keeps the scene centred on the window but clear of the panels over it: every atom (a disc of its
+ * radius) and cell corner at screen offset v from the window centre must stay outside each panel box grown by
+ * 16 px. Shrinking the view about the centre by s moves v to s v; a box that the segment from the centre to v enters
+ * at parameter t (slab method) bounds s <= t. Boxes over the centre are ignored, and s >= 0.6 (beyond that the
+ * overlap is accepted, as on narrow windows). The camera distance is divided by s (exact for the orthographic
+ * projection, close for the perspective one near the target depth). At most 20000 atoms are sampled.
+ */
+function clearOfPanels() {
+  if (!R || S.bz || (canvas && canvas.parentElement && canvas.parentElement.id === "sli")) return;
+  const cx = cam.w / 2, cy = cam.h / 2;
+  const boxes = viewObstacles().map(b => ({ x0: b.x - 16, y0: b.y - 16, x1: b.x + b.w + 16, y1: b.y + b.h + 16 }))
+    .filter(b => !(cx > b.x0 && cx < b.x1 && cy > b.y0 && cy < b.y1));
+  if (!boxes.length) return;
+  const V = cam.view(), P = cam.proj("gl"), th = Math.tan(cam.fovy / 2);
+  const proj = p => {
+    const v = [0, 1, 2, 3].map(r => V[r] * p[0] + V[4 + r] * p[1] + V[8 + r] * p[2] + V[12 + r]);
+    const c = [0, 1, 2, 3].map(r => P[r] * v[0] + P[4 + r] * v[1] + P[8 + r] * v[2] + P[12 + r] * v[3]);
+    return c[3] > 1e-9 ? { x: (c[0] / c[3] + 1) / 2 * cam.w, y: (1 - c[1] / c[3]) / 2 * cam.h, ppu: cam.h / (2 * (cam.ortho ? cam.dist * th : -v[2] * th)) } : null;
+  };
+  let s = 1;
+  const bound = (q, rad) => {
+    if (!q) return;
+    const dx = q.x - cx, dy = q.y - cy;
+    for (const b of boxes) {
+      let t0 = 0, t1 = 1;
+      for (const [p0, d, lo, hi] of [[cx, dx, b.x0 - rad, b.x1 + rad], [cy, dy, b.y0 - rad, b.y1 + rad]]) {
+        if (Math.abs(d) < 1e-9) { if (p0 <= lo || p0 >= hi) { t0 = 2; break; } continue; }
+        let u = (lo - p0) / d, w = (hi - p0) / d; if (u > w) [u, w] = [w, u];
+        t0 = Math.max(t0, u); t1 = Math.min(t1, w);
+        if (t0 > t1) break;
+      }
+      if (t0 <= t1 && t0 < s) s = t0;
+    }
+  };
+  const step = Math.max(1, Math.ceil(disp.atoms.length / 20000));
+  for (let i = 0; i < disp.atoms.length; i += step) { const at = disp.atoms[i], q = proj([at.x, at.y, at.z]); bound(q, q ? (at.r || 0) * q.ppu : 0); }
+  for (const L of S.layers) {
+    if (!L.visible) continue;
+    const it = itemOf(L), C = cellOf(it);
+    if (!C || (!S.cell && disp.atoms.length)) continue;
+    const r = pbcOf(it) ? S.reps : [1, 1, 1], o = originOf(it);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) bound(proj([0, 1, 2].map(c => o[c] + i * r[0] * C[0][c] + j * r[1] * C[1][c] + k * r[2] * C[2][c])), 0);
+  }
+  s = Math.max(s, 0.6);
+  if (s < 0.999) cam.dist /= s;
+}
 /** Re-centre the rotation pivot (and the depth range) on what is shown now, keeping the orientation and the zoom
  *  relative to the scene size; used whenever layers are added, removed, hidden or restored. */
 function refit() {
@@ -1770,14 +1864,17 @@ $("species").addEventListener("change", e => {
   if (e.target.checked) S.hide.delete(el); else S.hide.add(el);
   buildStructure(); summaries();
 });
-// an element's colour: the in-page picker, live; Default (or the default colour itself) removes the choice
-$("species").addEventListener("click", e => {
-  const b = e.target.closest(".sp-c");
+// an element's colour: the in-page picker, live; Default (or the default colour itself) removes the choice. From the
+// panel's element chips or from the element key in the view's corner.
+function elementColorClick(e) {
+  const b = e.target.closest(".sp-c, .ek");
   if (!b) return;
   const el = b.dataset.el;
   openPicker(b, { value: elColor(el), def: colorOf(el), title: `${el} atoms`,
     onInput: c => { if (c === colorOf(el)) S.colors.delete(el); else S.colors.set(el, c); recolor(); } });
-});
+}
+$("species").addEventListener("click", elementColorClick);
+$("elkey").addEventListener("click", elementColorClick);
 $("boundary").addEventListener("change", e => { S.boundary = e.target.checked; buildStructure(); });
 for (const [i, id] of ["ra", "rb", "rc"].entries()) $(id).addEventListener("change", e => {
   S.reps[i] = Math.min(6, Math.max(1, Math.round(+e.target.value) || 1)); e.target.value = S.reps[i];
@@ -1913,7 +2010,35 @@ window.addEventListener("keydown", e => {
   else if ((k === "home" || k === "end") && maxFrames() > 1) { e.preventDefault(); play(false); setFrame(k === "home" ? 0 : maxFrames() - 1); }
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
+// WHY: the 2D figure keeps clear of the panel, so opening or closing a section (the panel grows or shrinks) lays it out again
+try { new ResizeObserver(() => { if (SL.on && slMode() === "2d") drawSliceViews(); }).observe($("dock")); } catch (e) { /* no ResizeObserver */ }
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
+/* test site only (store.CHANNEL): typeface pickers for text and for numbers and file names (--sans, --mono); notes say
+   which characters isoview prints that a face lacks (they come from another font). Choices are kept in this browser. */
+const TEST_FONTS = [{"id":"inter","label":"Inter","kind":"text","family":"Inter","note":""},{"id":"source","label":"Source Sans 3","kind":"text","family":"isoview S3","note":""},{"id":"plex","label":"IBM Plex Sans","kind":"text","family":"isoview PX","note":"no ⁻"},{"id":"fira","label":"Fira Sans","kind":"text","family":"Fira Sans","note":""},{"id":"lato","label":"Lato","kind":"text","family":"isoview LT","note":""},{"id":"noto","label":"Noto Sans","kind":"text","family":"Noto Sans","note":"no arrows"},{"id":"opensans","label":"Open Sans","kind":"text","family":"Open Sans","note":"no ⁻"},{"id":"roboto","label":"Roboto","kind":"text","family":"Roboto","note":"no overbar"},{"id":"manrope","label":"Manrope","kind":"text","family":"Manrope","note":"no overbar"},{"id":"commissioner","label":"Commissioner","kind":"text","family":"Commissioner","note":"no ⁻"},{"id":"sourcecode","label":"Source Code Pro","kind":"mono","family":"isoview SCP","note":"no ⁻"},{"id":"jetbrains","label":"JetBrains Mono","kind":"mono","family":"JetBrains Mono","note":"no ⁻"},{"id":"plexmono","label":"IBM Plex Mono","kind":"mono","family":"isoview PXM","note":"no Greek"},{"id":"firamono","label":"Fira Mono","kind":"mono","family":"Fira Mono","note":""},{"id":"notomono","label":"Noto Sans Mono","kind":"mono","family":"Noto Sans Mono","note":""},{"id":"robotomono","label":"Roboto Mono","kind":"mono","family":"Roboto Mono","note":"no subscripts"}];
+if (store.CHANNEL) {
+  const SYS = { text: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' };
+  const DEF = { text: "inter", mono: "text" }; // WHY: the live site's faces, so the test site starts where live is
+  const pick = (kind, id, save) => {
+    const f = TEST_FONTS.find(x => x.kind === kind && x.id === id);
+    // mono "text": numbers and file names in the text face, with tabular (equal-width) digits everywhere
+    const v = kind === "mono" && id === "text" ? "var(--sans)" : f ? `"${f.family}", ${SYS[kind]}` : SYS[kind];
+    if (kind === "mono") document.documentElement.dataset.mono = id;
+    document.documentElement.style.setProperty(kind === "text" ? "--sans" : "--mono", v);
+    if (kind === "text") document.body.style.fontFeatureSettings = id === "inter" ? '"cv05"' : "normal"; // Inter: l with a tail
+    if (save) try { localStorage.setItem(store.PREFIX + "font-" + kind, id); } catch (e) { /* storage unavailable */ }
+    if (document.fonts) document.fonts.load(`600 16px ${v.startsWith("var(") ? css("--sans") : v}`).then(() => { restyle(); if (R && S.layers.length) { S.atlas = atlasOf(atlasSpecies()); buildStructure(); } }, () => {});
+  };
+  for (const kind of ["text", "mono"]) {
+    const sel = $("tb-" + kind);
+    sel.innerHTML = [`<option value="system">System</option>`, ...(kind === "mono" ? [`<option value="text">Same as text</option>`] : []), ...TEST_FONTS.filter(f => f.kind === kind).map(f => `<option value="${f.id}">${esc(f.label)}${f.note ? " (" + esc(f.note) + ")" : ""}</option>`)].join("");
+    let id = DEF[kind];
+    try { const v = localStorage.getItem(store.PREFIX + "font-" + kind); if (v === "system" || (kind === "mono" && v === "text") || TEST_FONTS.some(f => f.kind === kind && f.id === v)) id = v; } catch (e) { /* storage unavailable */ }
+    sel.value = id; pick(kind, id, false);
+    sel.addEventListener("change", () => pick(kind, sel.value, true));
+  }
+  $("testbar").hidden = false;
+}
 try { const t = localStorage.getItem(store.PREFIX + "theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
 
 /* ------------------------------------------------------------------ Brillouin zone */
@@ -1987,8 +2112,12 @@ $("bz").addEventListener("change", e => setBZ(e.target.checked));
 // camera's rotation: the zone and the crystal share one Cartesian frame (b_i . a_j = 2 pi delta_ij), so the same
 // rotation shows both from the same direction. Dragging in the box turns both; the wheel zooms the box; the corner
 // grip resizes it (kept in localStorage).
-const BZI = { R: null, cam: new Camera(), size: 220, on: true, zoom: 1, starting: false };
-try { const v = +localStorage.getItem(store.PREFIX + "bzi-size"); if (v >= 120) BZI.size = v; BZI.on = localStorage.getItem(store.PREFIX + "bzi") !== "0"; } catch (e) { /* storage unavailable */ }
+// pos: [left, bottom] CSS px where it was dragged (null: the default corner); size and pos are kept, like the slice inset
+const BZI = { R: null, cam: new Camera(), size: 220, on: true, zoom: 1, starting: false, pos: null };
+try {
+  const v = +localStorage.getItem(store.PREFIX + "bzi-size"); if (v >= 120) BZI.size = v; BZI.on = localStorage.getItem(store.PREFIX + "bzi") !== "0";
+  const p = JSON.parse(localStorage.getItem(store.PREFIX + "bzi-pos") || "null"); if (Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)) BZI.pos = p;
+} catch (e) { /* storage unavailable */ }
 $("bzi").checked = BZI.on;
 /** Side of the box in CSS px: the stored size, at most half the window width and 70% of its height. */
 const insetSide = () => Math.round(Math.max(120, Math.min(BZI.size, window.innerWidth * 0.5, window.innerHeight * 0.7)));
@@ -2026,8 +2155,11 @@ async function buildInset() {
 }
 /** Box and canvas size (device pixels at up to 2 per CSS pixel), then a redraw. */
 function sizeInset() {
-  const s = insetSide(), cv = BZI.R ? BZI.R.canvas : $("bzi-cv"), dpr = Math.min(window.devicePixelRatio || 1, 2);
-  $("bzinset").style.setProperty("--bzi", s + "px");
+  const s = insetSide(), cv = BZI.R ? BZI.R.canvas : $("bzi-cv"), dpr = Math.min(window.devicePixelRatio || 1, 2), box = $("bzinset");
+  box.style.setProperty("--bzi", s + "px");
+  // a dragged position, kept inside the window; without one the stylesheet's corner applies
+  if (BZI.pos) { box.style.left = Math.min(Math.max(4, BZI.pos[0]), window.innerWidth - s - 4) + "px"; box.style.bottom = Math.min(Math.max(4, BZI.pos[1]), window.innerHeight - s - 4) + "px"; }
+  else { box.style.left = ""; box.style.bottom = ""; }
   cv.width = cv.height = Math.round(s * dpr);
   BZI.cam.w = BZI.cam.h = s;
   requestRender();
@@ -2057,6 +2189,19 @@ $("bzi-cv").addEventListener("wheel", e => {
   const f = Math.exp(Math.sign(e.deltaY) * 0.12);
   BZI.zoom = Math.min(4, Math.max(0.25, BZI.zoom * f)); BZI.cam.dist *= f; requestRender();
 }, { passive: false });
+// the crystal inset moves by its handle (its canvas turns the crystal); the position is kept
+$("bzi-move").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const el = e.currentTarget, box = $("bzinset"), r0 = box.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+  if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
+  const move = ev => { BZI.pos = [r0.left + ev.clientX - x0, window.innerHeight - (r0.top + ev.clientY - y0) - r0.height]; sizeInset(); };
+  const up = () => {
+    el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up);
+    const b = box.getBoundingClientRect(); if (b.width) BZI.pos = [b.left, window.innerHeight - b.bottom];
+    try { localStorage.setItem(store.PREFIX + "bzi-pos", JSON.stringify(BZI.pos)); } catch (err) { /* storage unavailable */ }
+  };
+  el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+});
 $("bzi-grip").addEventListener("pointerdown", e => {
   e.preventDefault();
   const g = e.currentTarget, x0 = e.clientX, y0 = e.clientY, s0 = insetSide();
@@ -2096,6 +2241,7 @@ function setPhoto(on) {
   R.setBackground(liveBg()); if (BZI.R) BZI.R.setBackground(liveBg());
   resize(); if (S.bz && BZI.R) sizeInset();
   if (SL.on) applySliceView(); // the 2D view's margins and the inset's handles change
+  if (SL.on && SV.layout !== "inset" && slMode() !== "off") fit(); // the 3D view goes into (or leaves) its pane
 }
 function photoUI() {
   for (const b of $("ph-size").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === PH.size));
@@ -2141,20 +2287,28 @@ async function renderPhoto() {
   const g = out.getContext("2d"), bgs = PH.bg === "clear" ? [[0, 0, 0], [1, 1, 1]] : [PH.bg === "white" ? [1, 1, 1] : pal.bg];
   g.imageSmoothingQuality = "high";
   const ib = mode !== "off" && SV.inset ? insetBox() : null, I = ib && { x: Math.round(ib.x * s), y: Math.round(ib.y * s), w: Math.round(ib.w * s), h: Math.round(ib.h * s) };
-  const fine = !SL.style ? null : mode === "2d" ? await sliceFine(0.9 * Math.max(w, h)) : mode === "3d" && I ? await sliceFine(Math.max(I.w, I.h)) : null;
+  const split = splitMode(), sc = r => ({ x: Math.round(r.x * s), y: Math.round(r.y * s), w: Math.round(r.w * s), h: Math.round(r.h * s) });
+  const P3 = split && sc(panes().d3), P2 = split && sc(panes().d2);
+  const fine = !SL.style ? null : split ? await sliceFine(0.9 * Math.max(P2.w, P2.h)) : mode === "2d" ? await sliceFine(0.9 * Math.max(w, h)) : mode === "3d" && I ? await sliceFine(Math.max(I.w, I.h)) : null;
   const framed = r => { g.strokeStyle = css("--line2") || "#c8ccd2"; g.lineWidth = Math.max(1, s); g.strokeRect(r.x + g.lineWidth / 2, r.y + g.lineWidth / 2, r.w - g.lineWidth, r.h - g.lineWidth); };
   const bg = figBg(true);
   try {
-    if (mode === "2d") {
+    if (split) {
+      // side by side or stacked: the 3D view in its pane, the 2D figure (and its bar) in the other
+      drawTiles(R, cam, g, P3.x, P3.y, P3.w, P3.h, bgs);
+      g.clearRect(P2.x, P2.y, P2.w, P2.h);
+      if (bg) { g.fillStyle = bg; g.fillRect(P2.x, P2.y, P2.w, P2.h); }
+      if (fine) drawSlice2D(g, P2.x, P2.y, P2.w, P2.h, s, fine, panePad(), SL_FS, undefined, "pane");
+    } else if (mode === "2d") {
       if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
-      if (fine) drawSlice2D(g, 0, 0, w, h, s, fine, mainPad(), SL_FS, ib);
+      if (fine) drawSlice2D(g, 0, 0, w, h, s, fine, mainPad(), SL_FS, ib, "view");
       if (I) { g.clearRect(I.x, I.y, I.w, I.h); drawTiles(R, cam, g, I.x, I.y, I.w, I.h, bgs); framed(I); }
     } else {
       drawTiles(R, cam, g, 0, 0, w, h, bgs);
       if (I && fine) {
         g.clearRect(I.x, I.y, I.w, I.h);
         if (bg) { g.fillStyle = bg; g.fillRect(I.x, I.y, I.w, I.h); }
-        drawSlice2D(g, I.x, I.y, I.w, I.h, s, fine, [8, 8, 8, 8], SL_FS_INSET); framed(I);
+        drawSlice2D(g, I.x, I.y, I.w, I.h, s, fine, [8, 8, 8, 8], SL_FS_INSET, undefined, "inset"); framed(I);
       } else if (mode === "3d" && SV.bar && SL.in3d && SL.style) drawBarAlone(g, w, h, s, barRight());
       if (S.bz && BZI.R && !$("bzinset").hidden) {
         const b = $("bzinset").getBoundingClientRect(), x = Math.round(b.left * s), y = Math.round(b.top * s), side = Math.round(b.width * s);
@@ -2219,10 +2373,23 @@ function sliceTarget() {
 }
 /** "off" (no slice shown), or the main view: "3d" or "2d". */
 const slMode = () => (SL.on && !S.bz && sliceTarget() ? SV.main : "off");
+/** The Photo Mode split layout in use ("side" or "stack"), or null (inset layout, no slice, or not in Photo Mode). */
+const splitMode = () => (PH.on && slMode() !== "off" && SV.layout !== "inset" ? SV.layout : null);
+/** The two panes of a split layout, CSS px boxes { d3, d2 }: halves of the window, left and right ("side") or top
+ *  and bottom ("stack"); the main view (SV.main) takes the first one. */
+function panes() {
+  const W = window.innerWidth, H = window.innerHeight, side = splitMode() === "side";
+  const A = side ? { x: 0, y: 0, w: Math.round(W / 2), h: H } : { x: 0, y: 0, w: W, h: Math.round(H / 2) };
+  const B = side ? { x: A.w, y: 0, w: W - A.w, h: H } : { x: 0, y: A.h, w: W, h: H - A.h };
+  return SV.main === "3d" ? { d3: A, d2: B } : { d3: B, d2: A };
+}
+/** Padding (CSS px) of the 2D figure in its pane of a split layout: as Photo Mode pads the window. */
+const panePad = () => mainPad();
 /** The inset box in CSS px { x (left), y (top), w, h }: square around the 3D view; around the 2D figure, the plane's
  *  aspect (clamped to 1:3 .. 3:1) with room for the colour bar. Its longer side is SV.size (at most 60% of the window
  *  width and 70% of its height); it stays inside the window. */
 function insetBox() {
+  if (splitMode()) return panes().d3; // a split layout: the 3D pane
   const W = window.innerWidth, H = window.innerHeight, side = Math.max(120, Math.min(SV.size, W * 0.6, H * 0.7));
   let w = side, h = side;
   if (SV.main === "3d" && SL.img) {
@@ -2253,20 +2420,24 @@ function applySliceView() {
   $("slicebar").hidden = !on;
   $("sl-panel").hidden = !SL.on;
   $("ph-sl").hidden = !on;
-  box.hidden = !(on && SV.inset);
-  box.classList.toggle("d3", mode === "2d");
-  // the 3D view lives in the inset while the 2D slice is the main view
-  const home = mode === "2d" ? box : $("stage");
+  const split = splitMode();
+  box.hidden = !(on && (SV.inset || split));
+  box.classList.toggle("d3", mode === "2d" || !!split);
+  box.classList.toggle("pane", !!split);
+  document.body.classList.toggle("sl-split", !!split); // the 2D pane takes the pointer (no turning the 3D view from it)
+  // the 3D view lives in the inset box while the 2D slice is the main view, and in its pane in a split layout
+  const home = mode === "2d" || split ? box : $("stage");
   if (canvas && canvas.parentElement !== home) home.prepend(canvas);
-  $("sli-cv").hidden = mode === "2d";
-  $("slv").hidden = !(mode === "2d" || (mode === "3d" && SV.bar && !SV.inset && SL.in3d));
+  $("sli-cv").hidden = mode === "2d" || !!split;
+  $("slv").hidden = !(mode === "2d" || split || (mode === "3d" && SV.bar && !SV.inset && SL.in3d));
+  for (const b of $("ph-opts").querySelectorAll("button")) if (b.value === "inset") b.hidden = !!split;
   if (!box.hidden) placeInset();
   segSlice();
   resize();
   drawSliceViews();
 }
 /** True while the 3D view is on screen (it is hidden when the 2D slice fills the window without the inset). */
-const view3dShown = () => !(slMode() === "2d" && !SV.inset);
+const view3dShown = () => !(slMode() === "2d" && !SV.inset && !splitMode());
 /** Re-slices when anything the slice depends on changed (layer, field, shift, supercell, plane, position, the size
  *  it is drawn at). */
 function syncSlice() {
@@ -2386,8 +2557,8 @@ const figInk = () => (PH.on && PH.bg !== "scene" ? "#15171b" : css("--ink") || "
 const figBg = (exporting = false) => (exporting && PH.bg === "clear" ? null : `rgb(${liveBg().map(v => Math.round(255 * v)).join(",")})`);
 const figFont = () => css("--sans") || "system-ui, sans-serif";
 /** Padding of the 2D main view, CSS px [top, right, bottom, left], the same above and below and left and right so
- *  that the figure is centred in the window (the panel may cover its right, as it covers the 3D view): clear of the
- *  slice bar and the player below; in Photo Mode the same on all sides. */
+ *  that the figure is centred in the window (panels over the view are avoided by layoutClear): clear of the slice
+ *  bar and the player below; in Photo Mode the same on all sides. */
 function mainPad() {
   const W = window.innerWidth, H = window.innerHeight;
   if (PH.on) { const p = Math.max(24, Math.round(0.05 * Math.min(W, H))); return [p, p, p, p]; }
@@ -2403,24 +2574,34 @@ function dockRight() {
 }
 /** Draws the 2D figure (and its colour bar when SV.bar) of slice g into the box (x, y, w, h) of context ctx.
  *  k: pixels per CSS px; pad: CSS px [top, right, bottom, left]; fs: text size in CSS px. avoid: for the main view,
- *  the inset's box in CSS px (or null): the figure is centred in the box and kept clear of it (layoutClear);
- *  without avoid (the inset itself) the figure and bar are centred as a pair. */
-function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs, avoid) {
+ *  the boxes in CSS px of the panels over it (a box, a list or null): the figure stays centred and clear of them
+ *  (layoutClear); without avoid (the inset, a split pane) the figure and bar are centred as a pair. place: "view",
+ *  "pane" or "inset", the place whose dragged bar position applies (SV.barPos[place], fractions of the box); the
+ *  figure then leaves the bar no room. Returns the bar's box { x, y, w, h } in ctx pixels, or null without a bar. */
+function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs, avoid, place = "") {
   const P = g.plane, st = SL.style, F = fs * k, font = figFont(), ink = figInk(), bt = barTicks(st.mode, st.lo, st.hi);
   let title = barTitle();
-  const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0, a = P.width / P.height, pk = pad.map(p => p * k);
-  const Lo = avoid === undefined ? figureLayout(w, h, a, pk, bw, 6 * F)
-    : layoutClear(w, h, a, pk, bw, 6 * F, avoid && { x: avoid.x * k, y: avoid.y * k, w: avoid.w * k, h: avoid.h * k }, 16 * k);
+  const free = SV.bar && place && SV.barPos[place];
+  const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0, a = P.width / P.height, pk = pad.map(p => p * k), lw = free ? 0 : bw;
+  const Lo = avoid === undefined ? figureLayout(w, h, a, pk, lw, 6 * F)
+    : layoutClear(w, h, a, pk, lw, 6 * F, (Array.isArray(avoid) ? avoid : avoid ? [avoid] : []).map(R => ({ x: R.x * k, y: R.y * k, w: R.w * k, h: R.h * k })), 16 * k);
   drawFigure(ctx, x + Lo.x, y + Lo.y, Lo.w, Lo.h, { image: g.canvas, values: g.values, iw: g.W, ih: g.H, poly: P.poly, levels: sliceLevels(st),
     lines: SL.iso, atoms: SL.atoms ? sliceAtoms(P) : [], width: P.width, k });
-  if (!SV.bar) return;
+  if (!SV.bar) return null;
+  let bx = x + Lo.bx, by = y + Lo.by, bh = Lo.bh;
+  if (free) {
+    bh = Math.min(h - pk[0] - pk[2], Math.max(0.8 * Lo.h, 6 * F));
+    bx = x + Math.min(Math.max(0, free[0] * w), w - bw); by = y + Math.min(Math.max(0, free[1] * h), h - bh);
+  }
   ctx.save(); ctx.font = `${F}px ${font}`;
-  if (ctx.measureText(title).width > Lo.bh) title = ""; // a title longer than the bar is left out
+  if (ctx.measureText(title).width > bh) title = ""; // a title longer than the bar is left out
   ctx.restore();
-  drawColorBar(ctx, x + Lo.bx, y + Lo.by, Lo.bh, { fs: F, font, ink, bt, map: st.map, title, k });
+  drawColorBar(ctx, bx, by, bh, { fs: F, font, ink, bt, map: st.map, title, k });
+  return { x: bx, y: by, w: bw, h: bh };
 }
-/** The colour bar alone at the right of a W x H view (the 3D view without the inset): 40% of the height, at most
- *  320 CSS px, centred; right: CSS px kept free at the right. k: pixels per CSS px. */
+/** The colour bar alone over a W x H view (the 3D view without the inset): 40% of the height, at most 320 CSS px,
+ *  centred at the right (right: CSS px kept free there), or where it was dragged (SV.barPos.view, fractions of it).
+ *  k: pixels per CSS px. Returns the bar's box { x, y, w, h } in ctx pixels. */
 function drawBarAlone(ctx, W, H, k, right) {
   const st = SL.style, F = SL_FS * k, font = figFont(), bt = barTicks(st.mode, st.lo, st.hi);
   let title = barTitle();
@@ -2428,7 +2609,10 @@ function drawBarAlone(ctx, W, H, k, right) {
   ctx.save(); ctx.font = `${F}px ${font}`;
   if (ctx.measureText(title).width > bh) title = "";
   ctx.restore();
-  drawColorBar(ctx, W - right * k - bw, (H - bh) / 2, bh, { fs: F, font, ink: figInk(), bt, map: st.map, title, k });
+  const p = SV.barPos.view, bx = p ? Math.min(Math.max(0, p[0] * W), W - bw) : W - right * k - bw;
+  const by = p ? Math.min(Math.max(0, p[1] * H), H - bh) : (H - bh) / 2;
+  drawColorBar(ctx, bx, by, bh, { fs: F, font, ink: figInk(), bt, map: st.map, title, k });
+  return { x: bx, y: by, w: bw, h: bh };
 }
 /** Right margin (CSS px) of the colour bar alone: clear of the panel on screen, 24 px in Photo Mode. */
 function barRight() { return PH.on ? 24 : dockRight(); }
@@ -2442,21 +2626,51 @@ function drawSliceViews() {
     const ctx = cv.getContext("2d");
     if (ctx) {
       ctx.clearRect(0, 0, cv.width, cv.height);
-      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS, SV.inset ? insetBox() : null); }
-      else if (g && SL.style && mode === "3d") drawBarAlone(ctx, cv.width, cv.height, d, barRight());
+      let bar = null, host = { x: 0, y: 0, w: W, h: H };
+      if (g && SL.style && splitMode()) {
+        const P = panes().d2; host = P;
+        ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height);
+        bar = drawSlice2D(ctx, P.x * d, P.y * d, P.w * d, P.h * d, d, g, panePad(), SL_FS, undefined, "pane");
+      } else if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); bar = drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS, viewObstacles(), "view"); }
+      else if (g && SL.style && mode === "3d") bar = drawBarAlone(ctx, cv.width, cv.height, d, barRight());
+      placeBarHandle(bar && { x: bar.x / d, y: bar.y / d, w: bar.w / d, h: bar.h / d }, host, splitMode() ? "pane" : "view");
     }
-  }
+  } else placeBarHandle(null);
   const box = $("sli"), ic = $("sli-cv");
-  if (!box.hidden && mode === "3d") {
+  if (!box.hidden && mode === "3d" && !splitMode()) { // (in a split layout the box is the 3D pane)
     const b = insetBox();
     ic.width = Math.round(b.w * d); ic.height = Math.round(b.h * d);
     const ctx = ic.getContext("2d");
     if (ctx) {
       ctx.fillStyle = figBg(); ctx.fillRect(0, 0, ic.width, ic.height);
-      if (g && SL.style) drawSlice2D(ctx, 0, 0, ic.width, ic.height, d, g, [8, 8, 8, 8], SL_FS_INSET);
+      const bar = g && SL.style ? drawSlice2D(ctx, 0, 0, ic.width, ic.height, d, g, [8, 8, 8, 8], SL_FS_INSET, undefined, "inset") : null;
+      placeBarHandle(bar && { x: b.x + bar.x / d, y: b.y + bar.y / d, w: bar.w / d, h: bar.h / d }, b, "inset");
     }
   }
 }
+/** Puts the colour bar's drag handle over its box b (CSS px; null hides it); host: the box (CSS px) its position is
+ *  a fraction of, place: which position it sets ("view", "pane" or "inset"). */
+function placeBarHandle(b, host, place) {
+  const el = $("sl-barh");
+  el.hidden = !b;
+  if (!b) return;
+  Object.assign(el.style, { left: b.x + "px", top: b.y + "px", width: b.w + "px", height: b.h + "px" });
+  el._host = host; el._place = place;
+}
+// the colour bar moves by dragging its handle; a double click puts it back in its own place
+$("sl-barh").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const el = e.currentTarget, x0 = e.clientX, y0 = e.clientY, r0 = el.getBoundingClientRect(), H0 = el._host;
+  if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
+  const move = ev => {
+    const H = el._host || H0, cl = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    SV.barPos[el._place] = [cl((r0.left + ev.clientX - x0 - H.x) / H.w, 0, 1), cl((r0.top + ev.clientY - y0 - H.y) / H.h, 0, 1)];
+    drawSliceViews();
+  };
+  const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); saveSV(); };
+  el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+});
+$("sl-barh").addEventListener("dblclick", e => { delete SV.barPos[e.currentTarget._place]; saveSV(); drawSliceViews(); });
 /** Pressed states of the plane, scale, view, inset and colour-bar buttons (slice bar, panel, photo bar). */
 function segSlice() {
   for (const b of $("sl-planes").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SL.hkl.join(" ")));
@@ -2465,6 +2679,7 @@ function segSlice() {
   for (const id of ["sl-view", "ph-view"]) for (const b of $(id).querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SV.main));
   $("sl-inset").setAttribute("aria-pressed", String(SV.inset)); $("sl-bar").setAttribute("aria-pressed", String(SV.bar));
   for (const b of $("ph-opts").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === "inset" ? SV.inset : SV.bar));
+  for (const b of $("ph-layout").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === SV.layout));
 }
 function setSlicePlane(hkl) {
   if (hkl.length !== 3 || hkl.some(x => !Number.isInteger(x)) || hkl.every(x => x === 0)) { toast("Give three whole numbers h k l, not all zero, e.g. 1 1 0.", true); $("sl-hkl").value = SL.hkl.join(" "); return; }
@@ -2540,10 +2755,17 @@ $("sl-map").addEventListener("change", e => { SL.map = e.target.value; SL.fine =
 $("sl-iso").addEventListener("change", e => { SL.iso = e.target.checked; drawSliceViews(); });
 $("sl-atoms").addEventListener("change", e => { SL.atoms = e.target.checked; drawSliceViews(); });
 $("sl-3d").addEventListener("change", e => { SL.in3d = e.target.checked; paintSlice(); applySliceView(); });
-for (const id of ["sl-view", "ph-view"]) $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (b && b.value !== SV.main) setSliceView({ main: b.value }); });
+for (const id of ["sl-view", "ph-view"]) $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (b && b.value !== SV.main) { setSliceView({ main: b.value }); if (splitMode()) { fit(); requestRender(); } } });
 $("sl-inset").addEventListener("click", () => setSliceView({ inset: !SV.inset }));
 $("sl-bar").addEventListener("click", () => setSliceView({ bar: !SV.bar }));
 $("ph-opts").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setSliceView(b.value === "inset" ? { inset: !SV.inset } : { bar: !SV.bar }); });
+// Photo Mode layout: the 3D view changes shape, so it is fitted again to its new box
+$("ph-layout").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.value === SV.layout) return;
+  SV.layout = b.value; saveSV(); segSlice();
+  applySliceView(); fit(); requestRender();
+});
 $("sli-x").addEventListener("click", () => setSliceView({ inset: false }));
 $("sl-svg").addEventListener("click", async () => {
   if (!SL.img || !SL.style) return;
@@ -2558,7 +2780,7 @@ function moveInset(e) {
   e.preventDefault();
   const b0 = insetBox(), x0 = e.clientX, y0 = e.clientY, el = e.currentTarget;
   if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
-  const move = ev => { SV.pos = [b0.x + ev.clientX - x0, window.innerHeight - (b0.y + ev.clientY - y0) - b0.h]; placeInset(); if (slMode() === "2d") drawSliceViews(); };
+  const move = ev => { SV.pos = [b0.x + ev.clientX - x0, window.innerHeight - (b0.y + ev.clientY - y0) - b0.h]; placeInset(); drawSliceViews(); };
   const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); const b = insetBox(); SV.pos = [b.x, window.innerHeight - b.y - b.h]; saveSV(); };
   el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
 }
@@ -2569,12 +2791,12 @@ $("sli-grip").addEventListener("pointerdown", e => {
   const g = e.currentTarget, x0 = e.clientX, y0 = e.clientY, b0 = insetBox(), s0 = Math.max(120, Math.min(SV.size, window.innerWidth * 0.6, window.innerHeight * 0.7));
   if (!SV.pos) SV.pos = [b0.x, window.innerHeight - b0.y - b0.h];
   if (g.setPointerCapture) g.setPointerCapture(e.pointerId);
-  const move = ev => { SV.size = Math.max(120, s0 + Math.max(ev.clientX - x0, y0 - ev.clientY)); placeInset(); if (slMode() === "2d") resize(); drawSliceViews(); };
+  const move = ev => { SV.size = Math.max(120, s0 + Math.max(ev.clientX - x0, y0 - ev.clientY)); placeInset(); if (canvas.parentElement === $("sli")) resize(); drawSliceViews(); };
   const up = () => { g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); SV.size = Math.round(Math.max(120, Math.min(SV.size, window.innerWidth * 0.6, window.innerHeight * 0.7))); saveSV(); syncSlice(); };
   g.addEventListener("pointermove", move); g.addEventListener("pointerup", up);
 });
 $("sli").addEventListener("pointerdown", e => {
-  if (slMode() !== "2d" || e.target !== canvas) return;
+  if (e.target !== canvas) return; // the renderer's canvas is here only while the 2D view is main, or in a split pane
   e.preventDefault();
   const cv = canvas, pan = e.button !== 0 || e.ctrlKey || e.metaKey;
   let x = e.clientX, y = e.clientY;
@@ -2583,7 +2805,7 @@ $("sli").addEventListener("pointerdown", e => {
   const up = () => { cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); };
   cv.addEventListener("pointermove", move); cv.addEventListener("pointerup", up);
 });
-$("sli").addEventListener("wheel", e => { if (slMode() !== "2d" || e.target !== canvas) return; e.preventDefault(); cam.zoomBy(Math.exp(e.deltaY * (e.deltaMode ? 0.05 : 0.0015))); requestRender(); }, { passive: false });
+$("sli").addEventListener("wheel", e => { if (e.target !== canvas) return; e.preventDefault(); cam.zoomBy(Math.exp(e.deltaY * (e.deltaMode ? 0.05 : 0.0015))); requestRender(); }, { passive: false });
 $("sli").addEventListener("contextmenu", e => e.preventDefault());
 window.addEventListener("resize", () => { if (SL.on) syncSlice(); });
 

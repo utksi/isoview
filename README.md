@@ -46,7 +46,8 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
 - **Structure**: ball-and-stick, space filling or sticks; bond reach (back to 1.15 when another file is opened, unless "keep" beside it is on); supercell repeat; atoms on cell faces; the cell
   or box outline can be switched off for anything that has one (crystals, molecules in a box, cube grids, WAVECARs).
   Alkali and heavy alkaline-earth cations get no bonds when the rest of the structure is bonded (Cs in a halide perovskite), and do get them when nothing else would be (NaCl, CaF₂).
-  **Show elements** has a chip for each element, with its atom count: click the element to pick its colour in a
+  **Elements** has a chip for each element, with its atom count, and the corner of the view repeats the colours as an
+  element key: click a colour (in either place) to pick a new one in a
   small picker on the page (a saturation-brightness square, a hue slider, swatches, a hex field and Default; the
   scene follows as you move), untick it to hide those atoms and their
   bonds: the bonds are still found among all atoms, so hiding Cl does not bond the cations it kept apart. Hiding
@@ -138,7 +139,8 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   pymatgen and most band-structure plots; the line under the view names the lattice and the path. The zone follows
   the lattice of the structure (at the cell tolerance), and switching back restores the crystal and its view.
   A **crystal inset** (bottom left) shows the structure turning with the zone, since both share one Cartesian frame:
-  drag in it to turn both, scroll to zoom it, drag its corner to resize it; Crystal inset (Structure panel) hides it.
+  drag in it to turn both, scroll to zoom it, drag its corner to resize it and its top edge to move it (also in Photo
+  Mode; size and place are kept); Crystal inset (Structure panel) hides it.
 - **Look**: Classic, Soft (light from above and depth fog, as in many papers), Glossy, Toon (three tones, a highlight
   and outlines) and Outline (flat colours with ink lines, like a drawing). Outlines are pixel-exact on atoms and bonds.
   A first visit starts in Glossy; after that the look last chosen stays, also for new scenes and later visits.
@@ -155,9 +157,12 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   zoom to frame it, then **Save PNG** or **Copy** at the screen's size, 2× or 4× the window (up to 16 Mpx), on the
   theme's background, white, or transparent. Large images are drawn in tiles at twice the output size and
   averaged down; a transparent background comes from one render on black and one on white. In the Brillouin-zone
-  view the crystal inset is part of the photo. With a slice, the photo bar also switches the main view (3D or 2D),
-  the inset and the colour bar; the slice is sampled again for the output size, so contour lines stay smooth, and
-  its text is black on white or transparent photos. `Esc` or Done returns.
+  view the crystal inset is part of the photo, where it was placed. With a slice, the photo bar also picks the layout (the main view with
+  the other one in an inset, which can still be moved and resized; **Side by side**; or **Stacked**, the main view
+  first), the main view (3D or 2D), the inset and the colour bar. The colour bar can be dragged anywhere, in the
+  view, a split pane or the inset, each place keeping its own position (double-click puts it back), on screen and in
+  Photo Mode; the photo shows it where it was left. The slice is sampled again for
+  the output size, so contour lines stay smooth, and its text is black on white or transparent photos. `Esc` or Done returns.
 - **Kept between visits**: the last scene (its files, layers, edits, view and camera) is stored in this browser, so a
   reload brings it back. Scenes up to 512 MB of files are kept whole; larger files come back as atoms only. **New
   scene** (top left) clears it, and can be undone.
