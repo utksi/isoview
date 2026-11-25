@@ -18,10 +18,10 @@
  * Units: VASP CHGCAR-type files store rho * V_cell; they are divided by V_cell here (e/A^3). LOCPOT (eV) and ELFCAR
  * are kept as stored. Cube files in Bohr (positive voxel counts) are converted to Angstrom; their values are kept.
  */
-import { Cursor, readNumbers, tokens } from "./numbers.js?v=1001";
-import { elementOf, SYMBOLS } from "./elements.js?v=1001";
-import { BOHR, det3, inv3, fracToCart, fromParams, norm } from "./lattice.js?v=1001";
-import { finish, parseXDATCAR, parseOUTCAR, parseVasprun, parseXYZFrames, parseLAMMPS, parseQEout, parsePDB, parseGRO, parseCASTEP } from "./traj.js?v=1001";
+import { Cursor, readNumbers, tokens } from "./numbers.js?v=36";
+import { elementOf, SYMBOLS } from "./elements.js?v=36";
+import { BOHR, det3, inv3, fracToCart, fromParams, norm } from "./lattice.js?v=36";
+import { finish, parseXDATCAR, parseOUTCAR, parseVasprun, parseXYZFrames, parseLAMMPS, parseQEout, parsePDB, parseGRO, parseCASTEP } from "./traj.js?v=36";
 
 /* ------------------------------------------------------------------ detection */
 
