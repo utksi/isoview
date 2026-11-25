@@ -33,6 +33,11 @@ This product includes software from other projects, under their own licences:
   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
   OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+The typefaces in fonts/ (Inter, JetBrains Mono, Source Sans 3, Source Code Pro, IBM Plex
+Sans, IBM Plex Mono; subset and, where the licence requires, renamed) are licensed under the
+SIL Open Font License 1.1, not the Apache License; the licence texts and sources are in
+fonts/README.md and fonts/OFL-*.txt.
+
 The sample files listed under "From real calculations" in examples/README.md are
 third-party data, not covered by the Apache License; their licences (MIT, GPL-2.0)
 are in examples/LICENSES/.

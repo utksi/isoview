@@ -51,7 +51,7 @@ jobs:
             sed -i '0,/<meta charset="utf-8">/s//<meta charset="utf-8">\n<meta name="robots" content="noindex, nofollow">\n<meta name="isoview-channel" content="next">/' _site/next/index.html
             grep -q 'name="isoview-channel"' _site/next/index.html
           else
-            printf '%s\n' '<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>isoview test site</title><p>The test build did not pass its tests. The live site is at <a href="../">utkarsh.science/isoview</a>.</p>' > _site/next/index.html
+            printf '%s\n' '<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><title>isoview test site</title><p>The test site has no build that passes its tests. The live site is at <a href="../">utkarsh.science/isoview</a>.</p>' > _site/next/index.html
           fi
       - uses: actions/upload-pages-artifact@v3
         with: { path: _site }

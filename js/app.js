@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=35";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=35";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=35";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=35";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=35";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=35";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=35";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=35";
-import { measureAll } from "./measure.js?v=35";
-import { GifWriter, buildPalette } from "./gif.js?v=35";
-import * as store from "./store.js?v=35";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=35";
-import { chart, toCSV } from "./plot.js?v=35";
-import { openPicker } from "./picker.js?v=35";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=35";
-import { colormap } from "./slice.js?v=35";
-import { wignerSeitz, kpath } from "./bz.js?v=35";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1001";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1001";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1001";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1001";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1001";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1001";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1001";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=1001";
+import { measureAll } from "./measure.js?v=1001";
+import { GifWriter, buildPalette } from "./gif.js?v=1001";
+import * as store from "./store.js?v=1001";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1001";
+import { chart, toCSV } from "./plot.js?v=1001";
+import { openPicker } from "./picker.js?v=1001";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=1001";
+import { colormap } from "./slice.js?v=1001";
+import { wignerSeitz, kpath } from "./bz.js?v=1001";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -161,7 +161,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=35", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1001", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -221,9 +221,20 @@ function uniformsFor(c, r, w, h, bg = pal.bg, dpr = w / c.w, tile = null) {
 function frame() {
   dirty = false;
   if (!R) return;
+  const t0 = store.CHANNEL ? performance.now() : 0;
   if (view3dShown()) R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
   if (S.bz && BZI.R && !$("bzinset").hidden) drawInset();
   drawOverlay(); drawTriad();
+  if (store.CHANNEL) perfTick(t0);
+}
+// test site: frames drawn in the last second and the main-thread time of the last frame (ms; GPU work not included)
+const PERF = { times: [], shown: 0 };
+function perfTick(t0) {
+  const t = performance.now(), q = PERF.times;
+  q.push(t); while (q.length && q[0] < t - 1000) q.shift();
+  if (t - PERF.shown < 250) return;
+  PERF.shown = t;
+  $("tb-perf").textContent = `${R.name} · ${canvas.width}×${canvas.height} · ${q.length} fps · ${(t - t0).toFixed(1)} ms`;
 }
 
 /* ------------------------------------------------------------------ atoms, bonds, cells */
@@ -1473,7 +1484,7 @@ function summaries() {
 }
 function segState() {
   const aw = activeWave(), w = aw ? aw.L.w : { s: 0, mode: "density", half: "x" };
-  const val = { style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
+  const val = { font: S.font, style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
   for (const seg of document.querySelectorAll(".seg")) for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === val[seg.dataset.key]));
 }
 
@@ -1901,6 +1912,20 @@ window.addEventListener("keydown", e => {
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
+/* test site only (store.CHANNEL): the typeface switch; the choice is kept in this browser */
+S.font = "system";
+if (store.CHANNEL) {
+  S.font = "inter";
+  try { const v = localStorage.getItem(store.PREFIX + "font"); if (["system", "inter", "source", "plex"].includes(v)) S.font = v; } catch (e) { /* storage unavailable */ }
+  document.documentElement.dataset.font = S.font;
+  $("testbar").hidden = false;
+  bindSeg("font", v => {
+    S.font = v; document.documentElement.dataset.font = v;
+    try { localStorage.setItem(store.PREFIX + "font", v); } catch (e) { /* storage unavailable */ }
+    if (document.fonts) document.fonts.ready.then(restyle);
+  });
+  segState();
+}
 try { const t = localStorage.getItem(store.PREFIX + "theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
 
 /* ------------------------------------------------------------------ Brillouin zone */
