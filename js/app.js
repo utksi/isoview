@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=36";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=36";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=36";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=36";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=36";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=36";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=36";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=36";
-import { measureAll } from "./measure.js?v=36";
-import { GifWriter, buildPalette } from "./gif.js?v=36";
-import * as store from "./store.js?v=36";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=36";
-import { chart, toCSV } from "./plot.js?v=36";
-import { openPicker } from "./picker.js?v=36";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=36";
-import { colormap } from "./slice.js?v=36";
-import { wignerSeitz, kpath } from "./bz.js?v=36";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=1002";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=1002";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=1002";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=1002";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=1002";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=1002";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=1002";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=1002";
+import { measureAll } from "./measure.js?v=1002";
+import { GifWriter, buildPalette } from "./gif.js?v=1002";
+import * as store from "./store.js?v=1002";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=1002";
+import { chart, toCSV } from "./plot.js?v=1002";
+import { openPicker } from "./picker.js?v=1002";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=1002";
+import { colormap } from "./slice.js?v=1002";
+import { wignerSeitz, kpath } from "./bz.js?v=1002";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -163,7 +163,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=36", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=1002", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -223,6 +223,7 @@ function uniformsFor(c, r, w, h, bg = pal.bg, dpr = w / c.w, tile = null) {
 function frame() {
   dirty = false;
   if (!R) return;
+  if (fitClear) { fitClear = false; clearOfPanels(); }
   const t0 = store.CHANNEL ? performance.now() : 0;
   if (view3dShown()) R.draw(uniformsFor(cam, R, canvas.width, canvas.height, liveBg()));
   if (S.bz && BZI.R && !$("bzinset").hidden) drawInset();
@@ -421,7 +422,70 @@ function rows(toward, up) {
   const u = norm(u0) > 1e-6 ? unit(u0) : unit(cross(t, Math.abs(t[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
   return [cross(u, t), u, t];
 }
-function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); }
+function fit() { const s = sceneSphere(); cam.fit(s.c, s.r); fitClear = true; }
+/** Boxes (CSS px, { x, y, w, h }, clipped to the window) of the panels over the view: the panel at the right, the
+ *  slice inset, the Brillouin-zone inset and the analysis window; hidden and tucked ones are left out. None in Photo
+ *  Mode, where the photo lays out its own inset. */
+function viewObstacles() {
+  if (PH.on) return [];
+  const out = [], W = window.innerWidth, H = window.innerHeight;
+  for (const id of ["dock", "sli", "bzinset", "anwin"]) {
+    const el = $(id);
+    if (!el || el.hidden || el.classList.contains("tucked")) continue;
+    const r = id === "sli" ? insetBox() : el.getBoundingClientRect(), x = r.x ?? r.left, y = r.y ?? r.top;
+    const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(W, x + (r.w ?? r.width)), y1 = Math.min(H, y + (r.h ?? r.height));
+    if (x1 > x0 && y1 > y0) out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+  }
+  return out;
+}
+let fitClear = false; // set by fit(): the next frame moves the camera back, if needed, so that panels do not cover the scene
+/**
+ * After a fit, keeps the scene centred on the window but clear of the panels over it: every atom (a disc of its
+ * radius) and cell corner at screen offset v from the window centre must stay outside each panel box grown by
+ * 16 px. Shrinking the view about the centre by s moves v to s v; a box that the segment from the centre to v enters
+ * at parameter t (slab method) bounds s <= t. Boxes over the centre are ignored, and s >= 0.6 (beyond that the
+ * overlap is accepted, as on narrow windows). The camera distance is divided by s (exact for the orthographic
+ * projection, close for the perspective one near the target depth). At most 20000 atoms are sampled.
+ */
+function clearOfPanels() {
+  if (!R || S.bz || (canvas && canvas.parentElement && canvas.parentElement.id === "sli")) return;
+  const cx = cam.w / 2, cy = cam.h / 2;
+  const boxes = viewObstacles().map(b => ({ x0: b.x - 16, y0: b.y - 16, x1: b.x + b.w + 16, y1: b.y + b.h + 16 }))
+    .filter(b => !(cx > b.x0 && cx < b.x1 && cy > b.y0 && cy < b.y1));
+  if (!boxes.length) return;
+  const V = cam.view(), P = cam.proj("gl"), th = Math.tan(cam.fovy / 2);
+  const proj = p => {
+    const v = [0, 1, 2, 3].map(r => V[r] * p[0] + V[4 + r] * p[1] + V[8 + r] * p[2] + V[12 + r]);
+    const c = [0, 1, 2, 3].map(r => P[r] * v[0] + P[4 + r] * v[1] + P[8 + r] * v[2] + P[12 + r] * v[3]);
+    return c[3] > 1e-9 ? { x: (c[0] / c[3] + 1) / 2 * cam.w, y: (1 - c[1] / c[3]) / 2 * cam.h, ppu: cam.h / (2 * (cam.ortho ? cam.dist * th : -v[2] * th)) } : null;
+  };
+  let s = 1;
+  const bound = (q, rad) => {
+    if (!q) return;
+    const dx = q.x - cx, dy = q.y - cy;
+    for (const b of boxes) {
+      let t0 = 0, t1 = 1;
+      for (const [p0, d, lo, hi] of [[cx, dx, b.x0 - rad, b.x1 + rad], [cy, dy, b.y0 - rad, b.y1 + rad]]) {
+        if (Math.abs(d) < 1e-9) { if (p0 <= lo || p0 >= hi) { t0 = 2; break; } continue; }
+        let u = (lo - p0) / d, w = (hi - p0) / d; if (u > w) [u, w] = [w, u];
+        t0 = Math.max(t0, u); t1 = Math.min(t1, w);
+        if (t0 > t1) break;
+      }
+      if (t0 <= t1 && t0 < s) s = t0;
+    }
+  };
+  const step = Math.max(1, Math.ceil(disp.atoms.length / 20000));
+  for (let i = 0; i < disp.atoms.length; i += step) { const at = disp.atoms[i], q = proj([at.x, at.y, at.z]); bound(q, q ? (at.r || 0) * q.ppu : 0); }
+  for (const L of S.layers) {
+    if (!L.visible) continue;
+    const it = itemOf(L), C = cellOf(it);
+    if (!C || (!S.cell && disp.atoms.length)) continue;
+    const r = pbcOf(it) ? S.reps : [1, 1, 1], o = originOf(it);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) bound(proj([0, 1, 2].map(c => o[c] + i * r[0] * C[0][c] + j * r[1] * C[1][c] + k * r[2] * C[2][c])), 0);
+  }
+  s = Math.max(s, 0.6);
+  if (s < 0.999) cam.dist /= s;
+}
 /** Re-centre the rotation pivot (and the depth range) on what is shown now, keeping the orientation and the zoom
  *  relative to the scene size; used whenever layers are added, removed, hidden or restored. */
 function refit() {
@@ -1486,7 +1550,7 @@ function summaries() {
 }
 function segState() {
   const aw = activeWave(), w = aw ? aw.L.w : { s: 0, mode: "density", half: "x" };
-  const val = { font: S.font, style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
+  const val = { style: S.style, look: S.look, res: S.res, wspin: String(w.s), wmode: w.mode, half: w.half, proj: S.proj, theme: S.theme, loop: S.loop, mfmt: S.movie.fmt, msize: String(S.movie.scale) };
   for (const seg of document.querySelectorAll(".seg")) for (const b of seg.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === val[seg.dataset.key]));
 }
 
@@ -1914,20 +1978,34 @@ window.addEventListener("keydown", e => {
   else if ((k === "home" || k === "end") && maxFrames() > 1) { e.preventDefault(); play(false); setFrame(k === "home" ? 0 : maxFrames() - 1); }
   else if (k.length === 1 && "abc".includes(k)) viewAlong("abc".indexOf(k));
 });
+// WHY: the 2D figure keeps clear of the panel, so opening or closing a section (the panel grows or shrinks) lays it out again
+try { new ResizeObserver(() => { if (SL.on && slMode() === "2d") drawSliceViews(); }).observe($("dock")); } catch (e) { /* no ResizeObserver */ }
 try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (S.theme === "auto") restyle(); }); } catch (e) { /* old browsers */ }
-/* test site only (store.CHANNEL): the typeface switch; the choice is kept in this browser */
-S.font = "system";
+/* test site only (store.CHANNEL): typeface pickers for text and for numbers and file names (--sans, --mono); notes say
+   which characters isoview prints that a face lacks (they come from another font). Choices are kept in this browser. */
+const TEST_FONTS = [{"id":"inter","label":"Inter","kind":"text","family":"Inter","note":""},{"id":"source","label":"Source Sans 3","kind":"text","family":"isoview S3","note":""},{"id":"plex","label":"IBM Plex Sans","kind":"text","family":"isoview PX","note":"no ⁻"},{"id":"fira","label":"Fira Sans","kind":"text","family":"Fira Sans","note":""},{"id":"lato","label":"Lato","kind":"text","family":"isoview LT","note":""},{"id":"noto","label":"Noto Sans","kind":"text","family":"Noto Sans","note":"no arrows"},{"id":"opensans","label":"Open Sans","kind":"text","family":"Open Sans","note":"no ⁻"},{"id":"roboto","label":"Roboto","kind":"text","family":"Roboto","note":"no overbar"},{"id":"manrope","label":"Manrope","kind":"text","family":"Manrope","note":"no overbar"},{"id":"commissioner","label":"Commissioner","kind":"text","family":"Commissioner","note":"no ⁻"},{"id":"sourcecode","label":"Source Code Pro","kind":"mono","family":"isoview SCP","note":"no ⁻"},{"id":"jetbrains","label":"JetBrains Mono","kind":"mono","family":"JetBrains Mono","note":"no ⁻"},{"id":"plexmono","label":"IBM Plex Mono","kind":"mono","family":"isoview PXM","note":"no Greek"},{"id":"firamono","label":"Fira Mono","kind":"mono","family":"Fira Mono","note":""},{"id":"notomono","label":"Noto Sans Mono","kind":"mono","family":"Noto Sans Mono","note":""},{"id":"robotomono","label":"Roboto Mono","kind":"mono","family":"Roboto Mono","note":"no subscripts"}];
 if (store.CHANNEL) {
-  S.font = "inter";
-  try { const v = localStorage.getItem(store.PREFIX + "font"); if (["system", "inter", "source", "plex"].includes(v)) S.font = v; } catch (e) { /* storage unavailable */ }
-  document.documentElement.dataset.font = S.font;
+  const SYS = { text: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' };
+  const DEF = { text: "inter", mono: "sourcecode" }; // WHY: the live site's faces, so the test site starts where live is
+  const pick = (kind, id, save) => {
+    const f = TEST_FONTS.find(x => x.kind === kind && x.id === id);
+    // mono "text": numbers and file names in the text face, with tabular (equal-width) digits everywhere
+    const v = kind === "mono" && id === "text" ? "var(--sans)" : f ? `"${f.family}", ${SYS[kind]}` : SYS[kind];
+    if (kind === "mono") document.documentElement.dataset.mono = id;
+    document.documentElement.style.setProperty(kind === "text" ? "--sans" : "--mono", v);
+    if (kind === "text") document.body.style.fontFeatureSettings = id === "inter" ? '"cv05"' : ""; // Inter: l with a tail
+    if (save) try { localStorage.setItem(store.PREFIX + "font-" + kind, id); } catch (e) { /* storage unavailable */ }
+    if (document.fonts) document.fonts.load(`600 16px ${v.startsWith("var(") ? css("--sans") : v}`).then(() => { restyle(); if (R && S.layers.length) { S.atlas = atlasOf(atlasSpecies()); buildStructure(); } }, () => {});
+  };
+  for (const kind of ["text", "mono"]) {
+    const sel = $("tb-" + kind);
+    sel.innerHTML = [`<option value="system">System</option>`, ...(kind === "mono" ? [`<option value="text">Same as text</option>`] : []), ...TEST_FONTS.filter(f => f.kind === kind).map(f => `<option value="${f.id}">${esc(f.label)}${f.note ? " (" + esc(f.note) + ")" : ""}</option>`)].join("");
+    let id = DEF[kind];
+    try { const v = localStorage.getItem(store.PREFIX + "font-" + kind); if (v === "system" || (kind === "mono" && v === "text") || TEST_FONTS.some(f => f.kind === kind && f.id === v)) id = v; } catch (e) { /* storage unavailable */ }
+    sel.value = id; pick(kind, id, false);
+    sel.addEventListener("change", () => pick(kind, sel.value, true));
+  }
   $("testbar").hidden = false;
-  bindSeg("font", v => {
-    S.font = v; document.documentElement.dataset.font = v;
-    try { localStorage.setItem(store.PREFIX + "font", v); } catch (e) { /* storage unavailable */ }
-    if (document.fonts) document.fonts.ready.then(restyle);
-  });
-  segState();
 }
 try { const t = localStorage.getItem(store.PREFIX + "theme"); if (t === "light" || t === "dark") { S.theme = t; document.documentElement.setAttribute("data-theme", t); } } catch (e) { /* storage unavailable */ }
 
@@ -2401,8 +2479,8 @@ const figInk = () => (PH.on && PH.bg !== "scene" ? "#15171b" : css("--ink") || "
 const figBg = (exporting = false) => (exporting && PH.bg === "clear" ? null : `rgb(${liveBg().map(v => Math.round(255 * v)).join(",")})`);
 const figFont = () => css("--sans") || "system-ui, sans-serif";
 /** Padding of the 2D main view, CSS px [top, right, bottom, left], the same above and below and left and right so
- *  that the figure is centred in the window (the panel may cover its right, as it covers the 3D view): clear of the
- *  slice bar and the player below; in Photo Mode the same on all sides. */
+ *  that the figure is centred in the window (panels over the view are avoided by layoutClear): clear of the slice
+ *  bar and the player below; in Photo Mode the same on all sides. */
 function mainPad() {
   const W = window.innerWidth, H = window.innerHeight;
   if (PH.on) { const p = Math.max(24, Math.round(0.05 * Math.min(W, H))); return [p, p, p, p]; }
@@ -2418,14 +2496,14 @@ function dockRight() {
 }
 /** Draws the 2D figure (and its colour bar when SV.bar) of slice g into the box (x, y, w, h) of context ctx.
  *  k: pixels per CSS px; pad: CSS px [top, right, bottom, left]; fs: text size in CSS px. avoid: for the main view,
- *  the inset's box in CSS px (or null): the figure is centred in the box and kept clear of it (layoutClear);
- *  without avoid (the inset itself) the figure and bar are centred as a pair. */
+ *  the boxes in CSS px of the panels over it (a box, a list or null): the figure stays centred and clear of them
+ *  (layoutClear); without avoid (the inset itself) the figure and bar are centred as a pair. */
 function drawSlice2D(ctx, x, y, w, h, k, g, pad, fs, avoid) {
   const P = g.plane, st = SL.style, F = fs * k, font = figFont(), ink = figInk(), bt = barTicks(st.mode, st.lo, st.hi);
   let title = barTitle();
   const bw = SV.bar ? colorBarWidth(ctx, F, font, bt, title) : 0, a = P.width / P.height, pk = pad.map(p => p * k);
   const Lo = avoid === undefined ? figureLayout(w, h, a, pk, bw, 6 * F)
-    : layoutClear(w, h, a, pk, bw, 6 * F, avoid && { x: avoid.x * k, y: avoid.y * k, w: avoid.w * k, h: avoid.h * k }, 16 * k);
+    : layoutClear(w, h, a, pk, bw, 6 * F, (Array.isArray(avoid) ? avoid : avoid ? [avoid] : []).map(R => ({ x: R.x * k, y: R.y * k, w: R.w * k, h: R.h * k })), 16 * k);
   drawFigure(ctx, x + Lo.x, y + Lo.y, Lo.w, Lo.h, { image: g.canvas, values: g.values, iw: g.W, ih: g.H, poly: P.poly, levels: sliceLevels(st),
     lines: SL.iso, atoms: SL.atoms ? sliceAtoms(P) : [], width: P.width, k });
   if (!SV.bar) return;
@@ -2457,7 +2535,7 @@ function drawSliceViews() {
     const ctx = cv.getContext("2d");
     if (ctx) {
       ctx.clearRect(0, 0, cv.width, cv.height);
-      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS, SV.inset ? insetBox() : null); }
+      if (g && SL.style && mode === "2d") { ctx.fillStyle = figBg(); ctx.fillRect(0, 0, cv.width, cv.height); drawSlice2D(ctx, 0, 0, cv.width, cv.height, d, g, mainPad(), SL_FS, viewObstacles()); }
       else if (g && SL.style && mode === "3d") drawBarAlone(ctx, cv.width, cv.height, d, barRight());
     }
   }
@@ -2626,12 +2704,16 @@ function anData(it) {
   return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
 }
 const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
+// WHY: most MD codes write 0.5-2 fs steps; without a value the temperature and spectra could not be shown at all
+const DT0 = 1; // fs per saved frame assumed when neither the file nor the user gives one
+/** True when the main trajectory's time step is the assumed DT0 (no typed value, none in the file). */
+const dtAssumed = () => { const it = mainTraj(); return !!it && !it.dtUser && !(it.traj && it.traj.dt_fs); };
 /** Time step field of the main trajectory: the value typed for it (it.dtUser), else its file's (traj.dt_fs, marked
- *  "from the file"), else empty. Called from summaries(), so it follows the trajectory shown. */
+ *  "from the file"), else DT0 (marked "assumed"). Called from summaries(), so it follows the trajectory shown. */
 function syncDt() {
-  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || "" : "";
+  const it = mainTraj(), inp = $("an-dt"), v = it ? it.dtUser || (it.traj && it.traj.dt_fs) || DT0 : "";
   if (document.activeElement !== inp && String(inp.value) !== String(v)) inp.value = v;
-  $("an-dt-src").textContent = it && !it.dtUser && it.traj && it.traj.dt_fs ? "from the file" : "";
+  $("an-dt-src").textContent = !it || it.dtUser ? "" : it.traj && it.traj.dt_fs ? "from the file" : "assumed";
 }
 /** Opens the analysis window on tab kind and computes it. */
 function openAnalysis(kind) {
@@ -2651,7 +2733,9 @@ async function runAnalysis(quiet = false) {
   if ($("anwin").hidden) return;
   if (xrd && !it) { AN.res = null; $("an-keys").innerHTML = ""; $("an-res").textContent = ""; $("an-plot").innerHTML = '<div class="an-wait">X-ray diffraction needs a crystal (a structure with a cell).</div>'; return; }
   if (!it) return;
-  const dt_fs = anDt(), seq = ++AN.seq;
+  // WHY: an assumed step goes only to the per-frame quantities (the temperature needs one, and its note says it is
+  // assumed); the VDOS keeps its own marked 1 fs default, MSD and the XRD map stay in frames until a step is given
+  const dt_fs = dtAssumed() && AN.kind !== "frames" ? undefined : anDt(), seq = ++AN.seq;
   if (xrd) {
     const traj = !!it.traj && AN.x.mode !== "frame", o = { lambda: xrdLambda(), range: [AN.x.t0, AN.x.t1], fwhm: AN.x.fw };
     if (!quiet) { AN.res = null; $("an-res").textContent = ""; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">Computing…${traj ? " (every frame, up to 200)" : ""}</div>`; }
@@ -2840,7 +2924,10 @@ function anChart() {
     else panels.push({ series: [s], ylabel: q.t });
   }
   if (!have.length) lines.push("Not available for this file.");
-  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+  if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) {
+    lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
+    if (dtAssumed()) lines.push(`temperature: the time step is assumed (${DT0} fs per frame); type the real one, as T scales with 1/Δt²`);
+  }
   else if (!r.temperature) lines.push("temperature: needs the time step (Trajectory panel)");
   return { panels, keys, xlabel: r.t ? "*t* (ps)" : "frame", text: lines.join("\n"), xname: r.t ? "t (ps)" : "frame" };
 }
