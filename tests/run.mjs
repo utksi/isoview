@@ -418,7 +418,7 @@ if (env.ISOVIEW_WAVECAR) {
 /* samples on the opening page: every button has a file, every file opens with what it should show */
 {
   const app = fs.readFileSync(new URL("../js/app.js", import.meta.url), "utf8"), html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const SAMPLES = Object.fromEntries([...app.match(/const SAMPLES = \{([\s\S]*?)\};/)[1].matchAll(/(\w+): (?:\{ file: )?"([^"]+)"/g)].map(m => [m[1], m[2]]));
+  const SAMPLES = Object.fromEntries([...app.match(/const SAMPLES = \{([\s\S]*?)\};/)[1].matchAll(/(\w+): (?:\{ file: )?"([^"]+\.[\w.]+)"/g)].map(m => [m[1], m[2]]));
   const ids = [...html.matchAll(/data-example="(\w+)"/g)].map(m => m[1]);
   ok(ids.length >= 20 && ids.every(i => i === "h3d" || SAMPLES[i]) && Object.keys(SAMPLES).every(k => ids.includes(k)), `${ids.length} sample buttons, each with a file in SAMPLES (and no file without a button)`);
   const want = { cu55: d => d.traj.n === 101 && d.traj.energy, vasprun: d => d.traj.n === 264 && d.structure.species.length === 50 && d.traj.energy, outcar: d => d.traj.n === 79 && d.traj.energy,

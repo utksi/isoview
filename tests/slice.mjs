@@ -4,10 +4,11 @@
  * Tests of js/slice.js: plane geometry (cross-section polygons of known shape and area), sampling accuracy on an
  * analytic periodic field, open grids, contours of a circle, colour-map end points; colour-bar ticks (linear, signed,
  * log, factored powers of ten) at the positions the colour scale gives their values; the figure layout (aspect kept,
- * inside the padding, beside the bar, centred); the figure and colour bar drawn on a recording context.
+ * inside the padding, beside the bar, centred as a pair or the figure itself; kept clear of an inset with symmetric
+ * padding); the figure and colour bar drawn on a recording context.
  * Run: node tests/slice.mjs
  */
-import { slicePlane, sampleSlice, contours, colormap, barTicks, figureLayout, drawFigure, drawColorBar, colorBarWidth, scaler } from "../js/slice.js";
+import { slicePlane, sampleSlice, contours, colormap, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth, scaler } from "../js/slice.js";
 import { fromParams, norm, cross } from "../js/lattice.js";
 
 let pass = 0, fail = 0;
@@ -106,6 +107,16 @@ Lo = figureLayout(1000, 600, 0.5, [40, 20, 20, 20], 0, 0);
 ok(near(Lo.h, 540, 1e-9) && near(Lo.w, 270, 1e-9) && near(Lo.x + Lo.w / 2, 500, 1e-9) && near(Lo.y, 40, 1e-9), `layout, height-limited and centred: ${Lo.w} x ${Lo.h} at (${Lo.x}, ${Lo.y})`);
 Lo = figureLayout(800, 200, 8, [10, 10, 10, 10], 60, 120);
 ok(near(Lo.bh, 120, 1e-9) && Lo.by + Lo.bh <= 190 + 1e-9 && Lo.by >= 10 - 1e-9, `a flat figure keeps a readable bar: ${Lo.bh} px`);
+// the figure itself centred (bar on its right), and kept clear of an inset at the bottom left while staying centred
+Lo = figureLayout(1200, 800, 1, [76, 28, 76, 28], 90, 0, true);
+ok(near(Lo.x + Lo.w / 2, 600, 1e-9) && near(Lo.y + Lo.h / 2, 400, 1e-9) && near(Lo.h, 648, 1e-9) && near(Lo.bx, Lo.x + Lo.w, 1e-9), `figure centred in the window: ${Lo.w} x ${Lo.h} at (${Lo.x}, ${Lo.y})`);
+const inset = { x: 46, y: 464, w: 240, h: 240 }, hits = (L, R) => L.x < R.x + R.w && R.x < L.x + L.w && L.y < R.y + R.h && R.y < L.y + L.h;
+ok(hits(Lo, inset), "unobstructed, the centred figure would run under a 240 px inset at the bottom left");
+const Lc = layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, inset, 16);
+ok(!hits(Lc, inset) && !hits({ x: Lc.bx, y: Lc.by, w: 90, h: Lc.bh }, inset) && near(Lc.x + Lc.w / 2, 600, 1e-9) && near(Lc.y + Lc.h / 2, 400, 1e-9) && near(Lc.w, 2 * (600 - (46 + 240 + 16)), 1e-9),
+  `kept clear of the inset and still centred: ${Lc.w.toFixed(0)} x ${Lc.h.toFixed(0)} at (${Lc.x.toFixed(0)}, ${Lc.y.toFixed(0)})`);
+ok(layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, { x: 1000, y: 20, w: 60, h: 60 }, 16).w === Lo.w && layoutClear(1200, 800, 1, [76, 28, 76, 28], 90, 0, { x: 500, y: 300, w: 200, h: 200 }, 16).w === Lo.w,
+  "an inset out of the way changes nothing; one in the middle is overlapped rather than shrinking the figure to nothing");
 // drawing on a recording context: image first, contours, outline, atoms; bar, ticks, labels, title
 const calls = [], rec = new Proxy({ measureText: t => ({ width: 6 * String(t).length }), createLinearGradient: () => ({ addColorStop() {} }) }, {
   get: (o, k) => (k in o ? o[k] : (...a) => calls.push([k, ...a])), set: (o, k, v) => { calls.push(["=" + k, v]); return true; } });

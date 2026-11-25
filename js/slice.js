@@ -35,7 +35,7 @@
  * Linear labels whose largest magnitude has exponent e <= -3 or e >= 4 are written as v / 10^e with "x10^e" once
  * above the bar.
  */
-import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=33";
+import { inv3, cartToFrac, dot, cross, norm } from "./lattice.js?v=34";
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -242,17 +242,42 @@ function niceSteps(a, b, n) {
 
 /**
  * Where the figure and its colour bar go in a W x H box (any pixel unit): the figure (aspect = width / height) as
- * large as fits inside the padding pad = [top, right, bottom, left] next to a bar block of width barW (0: no bar),
- * the pair centred. The bar is 80% of the figure height (at least minBar, at most the room inside the padding),
- * centred on the figure. Returns { x, y, w, h (the figure), bx, by, bh (bar block left, top, height) }.
+ * large as fits inside the padding pad = [top, right, bottom, left] next to a bar block of width barW (0: no bar) on
+ * its right. centerFig false: the pair is centred between the paddings; true: the figure itself is centred on the
+ * box centre (W / 2, H / 2), as large as fits with its left edge after the left padding, its bar block before the
+ * right one and its top and bottom inside theirs. The bar is 80% of the figure height (at least minBar, at most the
+ * room inside the padding), centred on the figure. Returns { x, y, w, h (the figure), bx, by, bh (bar block left,
+ * top, height) }.
  */
-export function figureLayout(W, H, aspect, pad, barW = 0, minBar = 0) {
-  const [t, r, b, l] = pad, aw = Math.max(1, W - l - r - barW), ah = Math.max(1, H - t - b);
+export function figureLayout(W, H, aspect, pad, barW = 0, minBar = 0, centerFig = false) {
+  const [t, r, b, l] = pad;
+  const aw = Math.max(1, centerFig ? 2 * Math.min(W / 2 - l, W / 2 - r - barW) : W - l - r - barW);
+  const ah = Math.max(1, centerFig ? 2 * Math.min(H / 2 - t, H / 2 - b) : H - t - b);
   let w = aw, h = aw / aspect;
   if (h > ah) { h = ah; w = ah * aspect; }
-  const x = l + (W - l - r - (w + barW)) / 2, y = t + (ah - h) / 2;
-  const bh = Math.min(ah, Math.max(0.8 * h, minBar));
+  const x = centerFig ? (W - w) / 2 : l + (W - l - r - (w + barW)) / 2, y = centerFig ? (H - h) / 2 : t + (ah - h) / 2;
+  const bh = Math.min(H - t - b, Math.max(0.8 * h, minBar));
   return { x, y, w, h, bx: x + w, by: y + (h - bh) / 2, bh };
+}
+/**
+ * The figure centred in a W x H box (figureLayout with centerFig) and clear of the rectangle avoid = { x, y, w, h }
+ * (an inset; null: none) with a gap. When the figure or its bar block overlaps it, the padding on the inset's side
+ * grows to its inner edge, either sideways (left or right) or up or down; the choice with the larger figure is taken
+ * and the figure stays centred. When that figure would have less than a third of the unobstructed area, the overlap
+ * is kept.
+ */
+export function layoutClear(W, H, aspect, pad, barW, minBar, avoid, gap = 0) {
+  const L0 = figureLayout(W, H, aspect, pad, barW, minBar, true);
+  if (!avoid) return L0;
+  const over = (x, y, w, h) => x < avoid.x + avoid.w && avoid.x < x + w && y < avoid.y + avoid.h && avoid.y < y + h;
+  const hit = L => over(L.x, L.y, L.w, L.h) || (barW > 0 && over(L.bx, L.by, barW, L.bh));
+  if (!hit(L0)) return L0;
+  const [t, r, b, l] = pad, left = avoid.x + avoid.w / 2 < W / 2, low = avoid.y + avoid.h / 2 > H / 2;
+  const side = left ? [t, r, b, Math.max(l, avoid.x + avoid.w + gap)] : [t, Math.max(r, W - avoid.x + gap), b, l];
+  const vert = low ? [t, r, Math.max(b, H - avoid.y + gap), l] : [Math.max(t, avoid.y + avoid.h + gap), r, b, l];
+  const best = [figureLayout(W, H, aspect, side, barW, minBar, true), figureLayout(W, H, aspect, vert, barW, minBar, true)]
+    .filter(L => !hit(L)).sort((p, q) => q.w * q.h - p.w * p.h)[0];
+  return best && best.w * best.h >= L0.w * L0.h / 3 ? best : L0;
 }
 
 // contour segments per image (values array) and level, so that redraws (colours, theme, resizing) reuse them
@@ -267,8 +292,9 @@ function cachedContours(values, iw, ih, c) {
  * Draws a slice figure into the rectangle (x, y, w, h) of 2D context ctx (pixels; w / h should equal the plane's
  * width / height). o: { image (canvas or ImageBitmap, iw x ih, row 0 at V = 0), values (Float32Array(iw ih)), iw, ih,
  * poly (cross-section, fractions of U and V), levels (contour values), lines, atoms ([{ s, r, rad (A), color, w }]),
- * width (A, the plane's width), k (pixels per CSS pixel: line widths) }. Contours are white, dashed below zero; the
- * cross-section outline is drawn on top; atoms are discs of radius rad, opacity 0.45 + 0.55 w.
+ * width (A, the plane's width), k (pixels per CSS pixel: line widths) }. Contours are white, dashed below zero;
+ * atoms are discs of radius rad (at least 2 CSS px), opacity 0.45 + 0.55 w, clipped to the cross-section; the
+ * cross-section outline is drawn on top.
  */
 export function drawFigure(ctx, x, y, w, h, o) {
   const k = o.k || 1, X = s => x + s * w, Y = r => y + h - r * h;
@@ -288,15 +314,18 @@ export function drawFigure(ctx, x, y, w, h, o) {
     ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 0.8 * k; ctx.stroke();
   }
   ctx.setLineDash([]);
-  ctx.beginPath();
-  o.poly.forEach(([s, r], i) => (i ? ctx.lineTo(X(s), Y(r)) : ctx.moveTo(X(s), Y(r))));
-  ctx.closePath(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = k; ctx.stroke();
+  const outline = () => { ctx.beginPath(); o.poly.forEach(([s, r], i) => (i ? ctx.lineTo(X(s), Y(r)) : ctx.moveTo(X(s), Y(r)))); ctx.closePath(); };
   const pa = w / o.width;
-  for (const a of o.atoms || []) {
-    ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * k, a.rad * pa), 0, 2 * Math.PI);
-    ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = a.color; ctx.fill();
-    ctx.lineWidth = k; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
+  if (o.atoms && o.atoms.length) {
+    ctx.save(); outline(); ctx.clip();
+    for (const a of o.atoms) {
+      ctx.beginPath(); ctx.arc(X(a.s), Y(a.r), Math.max(2 * k, a.rad * pa), 0, 2 * Math.PI);
+      ctx.globalAlpha = 0.45 + 0.55 * a.w; ctx.fillStyle = a.color; ctx.fill();
+      ctx.lineWidth = k; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
+  outline(); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = k; ctx.stroke();
   ctx.restore();
 }
 
