@@ -9,7 +9,7 @@
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233058d0' stroke-width='2.2'%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' transform='rotate(-24 16 16)'/%3E%3Cellipse cx='16.8' cy='15.4' rx='7.6' ry='4.8' transform='rotate(-24 16 16)'/%3E%3C/g%3E%3Ccircle cx='17.4' cy='15' r='2' fill='%233058d0'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/style.css?v=38">
+<link rel="stylesheet" href="css/style.css?v=39">
 </head>
 <body>
 <div id="stage" aria-label="3D view"><canvas id="gl"></canvas></div>
@@ -223,7 +223,7 @@
   <div class="an-plot" id="an-plot"></div>
   <div class="an-keys" id="an-keys" role="group" aria-label="Curves shown"></div>
   <p class="an-res" id="an-res"></p>
-  <div class="sl-opts"><span id="an-opts" class="an-opts"></span><span class="sl-sp"></span><button type="button" class="sl-save" id="an-csv" title="The curves shown, as CSV">CSV</button><button type="button" class="sl-save" id="an-svg" title="The figure as SVG, 3.5 in wide (one journal column), only the curves shown">SVG</button><button type="button" class="sl-save" id="an-png" title="The figure as PNG at 600 dpi, 3.5 in wide, only the curves shown">PNG</button></div>
+  <div class="sl-opts"><span id="an-win" class="an-opts" role="group" aria-label="Frames analysed" title="The part of the trajectory analysed and averaged over; empty fields mean the start and the end" hidden><label>from <input type="number" id="an-w0" min="0" step="any" aria-label="Window start"></label><label>to <input type="number" id="an-w1" min="0" step="any" aria-label="Window end"></label><span id="an-wu">frames</span><button type="button" class="sl-save" id="an-wall" title="Analyse the whole trajectory" hidden>All</button></span><span id="an-opts" class="an-opts"></span><span class="sl-sp"></span><button type="button" class="sl-save" id="an-csv" title="The curves shown, as CSV">CSV</button><button type="button" class="sl-save" id="an-svg" title="The figure as SVG, 3.5 in wide (one journal column), only the curves shown">SVG</button><button type="button" class="sl-save" id="an-png" title="The figure as PNG at 600 dpi, 3.5 in wide, only the curves shown">PNG</button></div>
 </div>
 <div class="pill glass" id="measure" hidden></div>
 <div class="pill glass" id="labelbar" hidden><span id="label-count">Click atoms to label them</span><button type="button" id="label-all" title="Label every atom drawn">Label all</button><button type="button" id="label-clear">Clear</button><button type="button" id="label-done" class="strong" title="Leave label mode (L); the labels stay">Done</button></div>
@@ -260,6 +260,6 @@
 </div>
 <input type="file" id="file" multiple hidden>
 
-<script type="module" src="js/app.js?v=38"></script>
+<script type="module" src="js/app.js?v=39"></script>
 </body>
 </html>
