@@ -47,23 +47,23 @@
  * Photo mode (PH): controls hidden, the view supersampled; saved or copied images are drawn in tiles
  * (camera.js tileProjection) at PH_SS times the output size, with matting for a transparent background.
  */
-import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=38";
-import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=38";
-import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=38";
-import { primitive, conventional, sameCellShape } from "./symmetry.js?v=38";
-import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=38";
-import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=38";
-import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=38";
-import { buildAtlas, packLabels } from "./gfx/labels.js?v=38";
-import { measureAll } from "./measure.js?v=38";
-import { GifWriter, buildPalette } from "./gif.js?v=38";
-import * as store from "./store.js?v=38";
-import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=38";
-import { chart, toCSV } from "./plot.js?v=38";
-import { openPicker } from "./picker.js?v=38";
-import { WAVELENGTHS, hklText } from "./xrd.js?v=38";
-import { colormap } from "./slice.js?v=38";
-import { wignerSeitz, kpath } from "./bz.js?v=38";
+import { params, formula, det3, norm, cross, dot, inv3, cartToFrac, fracToCart } from "./lattice.js?v=39";
+import { fractionAbove, isoForFraction, autoStride, insidePolygon } from "./field.js?v=39";
+import { displayAtoms, bondList, atomId, deleteAtoms, toPOSCAR, shownStructure, toCIF, toXYZ } from "./structure.js?v=39";
+import { primitive, conventional, sameCellShape } from "./symmetry.js?v=39";
+import { colorOf, rcov, SPACERS, SYMBOLS } from "./elements.js?v=39";
+import { Camera, qfromRows, qmat, pickSphere, tileProjection } from "./gfx/camera.js?v=39";
+import { createRenderer, packAtoms, packBonds, packLines, packUniforms, hexToRgb01 } from "./gfx/renderer.js?v=39";
+import { buildAtlas, packLabels } from "./gfx/labels.js?v=39";
+import { measureAll } from "./measure.js?v=39";
+import { GifWriter, buildPalette } from "./gif.js?v=39";
+import * as store from "./store.js?v=39";
+import { contours, scaler, paint, lut, barTicks, figureLayout, layoutClear, drawFigure, drawColorBar, colorBarWidth } from "./slice.js?v=39";
+import { chart, toCSV } from "./plot.js?v=39";
+import { openPicker } from "./picker.js?v=39";
+import { WAVELENGTHS, hklText } from "./xrd.js?v=39";
+import { colormap } from "./slice.js?v=39";
+import { wignerSeitz, kpath } from "./bz.js?v=39";
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -169,7 +169,7 @@ const activeAtomsLayer = () => S.layers.find(l => l.id === S.activeAtoms && l.ki
 let worker = null, reqId = 0;
 const pending = new Map();
 function startWorker() {
-  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=38", import.meta.url), { type: "module" });
+  worker = globalThis.__isoviewWorker ? new globalThis.__isoviewWorker() : new Worker(new URL("./worker.js?v=39", import.meta.url), { type: "module" });
   worker.onmessage = e => { const p = pending.get(e.data.id); if (!p) return; pending.delete(e.data.id); if (e.data.ok) p.res(e.data.result); else p.rej(new Error(e.data.error)); };
   worker.onerror = e => toast("The background worker failed: " + (e.message || "could not start"), true, 9000);
 }
@@ -1428,7 +1428,7 @@ function serialize(withFiles = false) {
   const index = new Map(items.map((it, k) => [it.id, k]));
   const state = {
     v: 1, saved: Date.now(),
-    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, hadFiles: !!(it.files && it.files.length), dt: it.dtUser || null,
+    items: items.map(it => ({ key: it.key, name: it.name, example: it.example, kept: it.kept, hadFiles: !!(it.files && it.files.length), dt: it.dtUser || null, win: it.win || null,
       structure: it.structure && (!it.kept && !it.example || it.structure.ids) && !(it.traj && it.kept) ? it.structure : null,
       ids: it.traj && it.structure && it.structure.ids ? it.structure.ids : null })),
     layers: S.layers.map(L => ({ item: index.get(L.item), kind: L.kind, visible: L.visible, ...(L.kind === "field" ? { fi: L.fi, iso: L.iso, p: L.p, mode: L.mode, pm: L.pm, opacity: L.opacity, pos: L.pos, neg: L.neg, cuts: L.cuts, auto: !!L.auto, w: L.w } : {}) })),
@@ -1474,6 +1474,7 @@ async function restoreScene(st, files, stored = true) {
       const it = [...S.items.values()].pop();
       if (sp.structure && !it.traj) it.structure = sp.structure;
       if (sp.dt > 0) it.dtUser = sp.dt;
+      if (Array.isArray(sp.win) && sp.win.length === 2) it.win = sp.win.map(Number);
       if (it.traj && sp.ids) { const n = sp.ids.length, ids = sp.ids; it.structure = { ...it.structure, species: Array.from(ids, id => it.traj && d.structure.species[id - 1]), ids, pos: new Float64Array(3 * n) }; }
       if (sp.hadFiles && !sp.kept) missing.push(sp.name + " (atoms only: its files were too large to keep)");
       made.push(it);
@@ -2819,18 +2820,42 @@ const AN = { kind: "rdf", rmax: 8, freq: "THz", fmax: null, res: null, seq: 0, o
 const AN_COLORS = ["#3058d0", "#e3a03a", "#2bb3a3", "#d6456a", "#7cb342", "#9b7be0", "#ef7d4b", "#5c9bd6", "#a0785a", "#c05fb0"];
 const AN_TOTAL = "#6b7280";
 const THZ_TO_CM = 33.35641; // cm^-1 per THz
-/** The main trajectory restricted to the atoms still present (structure.ids): { structure, traj } for analysis.js. */
-function anData(it) {
-  const t = it.traj, st = it.structure, ids = st.ids;
-  let pos = t.pos, nat = t.nat;
+/** The main trajectory restricted to the atoms still present (structure.ids) and, with win = true, to the frames of
+ *  its analysis window (anWin): { structure, traj } for analysis.js, frame 0 of traj being frame f0 of the file. */
+function anData(it, win = false) {
+  const t = it.traj, st = it.structure, ids = st.ids, [f0, f1] = win ? anWin(it) : [0, t.n - 1], n = f1 - f0 + 1;
+  let pos = t.pos.subarray(3 * t.nat * f0, 3 * t.nat * (f1 + 1)), nat = t.nat;
   if (ids) {
-    nat = ids.length; pos = new Float64Array(3 * nat * t.n);
-    for (let f = 0; f < t.n; f++) for (let j = 0; j < nat; j++) {
-      const a = 3 * (t.nat * f + ids[j] - 1), b = 3 * (nat * f + j);
+    nat = ids.length; pos = new Float64Array(3 * nat * n);
+    for (let f = 0; f < n; f++) for (let j = 0; j < nat; j++) {
+      const a = 3 * (t.nat * (f + f0) + ids[j] - 1), b = 3 * (nat * f + j);
       pos[b] = t.pos[a]; pos[b + 1] = t.pos[a + 1]; pos[b + 2] = t.pos[a + 2];
     }
   }
-  return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos }, traj: { n: t.n, nat, pos, cells: t.cells, energy: t.energy } };
+  return { structure: { species: st.species, lattice: st.lattice, pbc: st.pbc, pos: st.pos },
+    traj: { n, nat, pos, cells: t.cells && t.cells.subarray(9 * f0, 9 * (f1 + 1)), energy: t.energy && t.energy.subarray(f0, f1 + 1) } };
+}
+/** Analysis window of trajectory item it: [f0, f1], 0-based frames, inclusive; the whole trajectory unless the user
+ *  set one (it.win), clipped to the frames present. */
+function anWin(it) {
+  const n = it.traj.n, w = it.win;
+  if (!w) return [0, n - 1];
+  const f0 = Math.max(0, Math.min(n - 1, w[0])), f1 = Math.max(f0, Math.min(n - 1, w[1]));
+  return [f0, f1];
+}
+// WHY: in ps only when the time step is known (typed or from the file); with the assumed 1 fs the window is in frames,
+// as are the MSD and XRD time axes then
+const winPs = () => !dtAssumed() && anDt() > 0;
+/** Frame f (0-based) as shown in the window fields: time in ps (frame 0 at t = 0, as on the per-frame axis), or the
+ *  1-based frame number. */
+const winShow = f => (winPs() ? +(f * anDt() / 1000).toPrecision(6) : f + 1);
+/** Inverse of winShow for a typed value v: the nearest 0-based frame, or null for an empty or invalid field. */
+const winParse = v => { const x = parseFloat(v); return Number.isFinite(x) ? Math.round(winPs() ? x * 1000 / anDt() : x - 1) : null; };
+/** One line on the window used, for the result text: "frames 101–500 of 500 (0.1–0.5 ps)"; "" for the whole trajectory. */
+function winText(it) {
+  const [f0, f1] = anWin(it), n = it.traj.n;
+  if (f0 === 0 && f1 === n - 1) return "";
+  return `window: frames ${f0 + 1}–${f1 + 1} of ${n}${winPs() ? ` (${winShow(f0)}–${winShow(f1)} ps)` : ""}`;
 }
 const anDt = () => { const v = parseFloat($("an-dt").value); return v > 0 ? v : undefined; };
 // WHY: most MD codes write 0.5-2 fs steps; without a value the temperature and spectra could not be shown at all
@@ -2870,17 +2895,18 @@ async function runAnalysis(quiet = false) {
     if (!quiet) { AN.res = null; $("an-res").textContent = ""; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">Computing…${traj ? " (every frame, up to 200)" : ""}</div>`; }
     try {
       let r;
-      if (traj) { const d = anData(it); r = await call("xrd", { mode: "traj", structure: d.structure, traj: d.traj, opts: { ...o, maxFrames: 200 } }); }
+      if (traj) { const d = anData(it, true); r = await call("xrd", { mode: "traj", structure: d.structure, traj: d.traj, opts: { ...o, maxFrames: 200 } }); }
       else { const st = it.structure; r = await call("xrd", { mode: "one", structure: { species: st.species, lattice: st.lattice, pos: st.pos }, opts: o }); }
       if (seq !== AN.seq) return;
-      AN.res = { kind: "xrd", r, name: it.name, mode: traj ? AN.x.mode : "frame", frame: it.traj ? S.frame : null, nFrames: it.traj ? it.traj.n : 0, dt: dt_fs, href: null, st: it.structure, it };
+      if (traj) { const f0 = anWin(it)[0]; r.frames = r.frames.map(f => f + f0); }
+      AN.res = { kind: "xrd", r, name: it.name, mode: traj ? AN.x.mode : "frame", frame: it.traj ? S.frame : null, nFrames: it.traj ? anWin(it)[1] - anWin(it)[0] + 1 : 0, dt: dt_fs, href: null, st: it.structure, it };
       drawAnalysis();
     } catch (e) { if (seq === AN.seq) { AN.res = null; $("an-keys").innerHTML = ""; $("an-plot").innerHTML = `<div class="an-wait">${esc(e.message || String(e))}</div>`; } }
     return;
   }
   AN.res = null; $("an-res").textContent = "";
   $("an-plot").innerHTML = '<div class="an-wait">Computing…</div>'; $("an-keys").innerHTML = "";
-  const { structure, traj } = anData(it);
+  const { structure, traj } = anData(it, AN.kind !== "frames");
   try {
     // WHY: the VDOS needs a time step; without one it is drawn for 1 fs per frame and says so (its frequencies scale
     // as 1 / time step), MSD and per-frame series stay in frames
@@ -2894,6 +2920,7 @@ async function runAnalysis(quiet = false) {
 /** The options of the current tab, in the window's bottom row. */
 function anOptions() {
   const o = $("an-opts");
+  anWinOpts();
   if (AN.kind === "rdf") o.innerHTML = `<label>r max <input type="number" id="an-rmax" min="1" max="30" step="0.5" value="${AN.rmax}"> Å</label>`;
   else if (AN.kind === "vacf") o.innerHTML = `<div class="seg2" id="an-freq"><button type="button" value="THz" aria-pressed="${AN.freq === "THz"}">THz</button><button type="button" value="cm" aria-pressed="${AN.freq === "cm"}">cm⁻¹</button></div><label>up to <input type="number" id="an-fmax" min="0" step="any" placeholder="auto" value="${AN.fmax ? +(AN.fmax * (AN.freq === "cm" ? THZ_TO_CM : 1)).toPrecision(4) : ""}"></label>`;
   else if (AN.kind === "xrd") {
@@ -2906,6 +2933,18 @@ function anOptions() {
       (it && it.traj ? `<div class="seg2" id="an-xmode" title="Frame: the pattern of the frame shown (follows the player); Average: over the frames; Map: 2θ against time">${[["frame", "Frame"], ["avg", "Average"], ["map", "Map"]].map(([v, t]) => `<button type="button" value="${v}" aria-pressed="${x.mode === v}">${t}</button>`).join("")}</div>` : "");
   }
   else o.innerHTML = "";
+}
+/** The window fields (from, to, in ps or frames) of the analysis window, shown for the tabs that use the trajectory's
+ *  frames: RDF, MSD, VDOS, per frame and XRD average or map. Empty fields mean the first and the last frame. */
+function anWinOpts() {
+  const box = $("an-win"), it = mainTraj(), show = !!(it && it.traj && it.traj.n > 1 && (AN.kind !== "xrd" || AN.x.mode !== "frame"));
+  box.hidden = !show;
+  if (!show) return;
+  const [f0, f1] = anWin(it), u = winPs() ? "ps" : "frames", n = it.traj.n, on = f0 > 0 || f1 < n - 1;
+  $("an-w0").value = winShow(f0); $("an-w1").value = winShow(f1);
+  $("an-w0").placeholder = winShow(0); $("an-w1").placeholder = winShow(n - 1);
+  $("an-wu").textContent = u;
+  $("an-wall").hidden = !on;
 }
 // XRD following the player: one computation at a time, the latest frame next
 let xrdBusy = false, xrdAgain = false;
@@ -2943,7 +2982,7 @@ function xrdChart(keys, key) {
   if (r.map) {
     const k = R0.dt ? R0.dt / 1000 : 1, t = r.frames.map(f => (R0.dt ? f * k : f + 1)), y0 = t[0], y1 = t.length > 1 ? t[t.length - 1] : t[0] + 1, ylab = R0.dt ? "*t* (ps)" : "frame";
     if (R0.mode === "avg") return { panels: [{ series: [{ label: "average", x: r.x, y: r.avg, color: AN_COLORS[0], width: 1.3 }], ylabel: "intensity (rel.)", zero: true }], keys, xlabel: xl, xr: [r.x[0], r.x[r.x.length - 1]],
-      text: `${head} · average over ${r.frames.length} of ${R0.nFrames} frames · peak width ${r.fwhm}°`, xname: "2theta (deg)" };
+      text: `${head} · average over ${r.frames.length} of ${R0.nFrames} frames${winText(R0.it) ? " · " + winText(R0.it) : ""} · peak width ${r.fwhm}°`, xname: "2theta (deg)" };
     if (R0.href === null || R0.hrefLog !== AN.x.log) { R0.href = xrdHeatURL(r, AN.x.log); R0.hrefLog = AN.x.log; }
     const now = R0.dt ? S.frame * k : S.frame + 1, series = now >= y0 && now <= y1 ? [{ label: "", x: [r.x[0], r.x[r.x.length - 1]], y: [now, now], color: "#ffffff", dash: true, width: 1 }] : [];
     return { panels: [{ series, ylabel: ylab, yr: [y0, y1], heat: { href: R0.href, x0: r.x[0], x1: r.x[r.x.length - 1], y0, y1, stops: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1].map(v => `rgb(${colormap("viridis", v).join(",")})`), lo: AN.x.log ? 0.1 : 0, hi: 100 } }],
@@ -3009,7 +3048,7 @@ function anChart() {
       const { p, m } = firstShell(q.g, r.dr);
       if (q.g[p] > 0) lines.push(`${q.label.padEnd(7)} peak ${r.r[p].toFixed(2)} Å   ${q.b} around ${q.a}: ${q.nab[m].toFixed(2)}${q.a !== q.b ? `, ${q.a} around ${q.b}: ${q.nba[m].toFixed(2)}` : ""} (to ${r.rEdge[m].toFixed(2)} Å)`);
     });
-    lines.push(`${r.frames.length} frames averaged`);
+    lines.push(`${r.frames.length} frames averaged${winText(AN.res.it) ? " · " + winText(AN.res.it) : ""}`);
     return { panels: [{ series, ylabel: "*g*(*r*)", zero: true }], keys, xlabel: "*r* (Å)", xr: [0, r.rmax], text: lines.join("\n"), xname: "r (A)" };
   }
   if (kind === "msd") {
@@ -3023,6 +3062,7 @@ function anChart() {
       if (showFits && Number.isFinite(e.slope)) series.push({ label: "", x: e.fit, y: e.fit.map(t => e.slope * t + e.intercept), color: c, dash: true, width: 1 });
       lines.push(ps && e.D_cm2s != null ? `${e.el.padEnd(3)} D = ${e.D_cm2s.toExponential(2)} cm²/s  (${e.D_A2ps.toPrecision(3)} Å²/ps, ${e.count} atoms)` : `${e.el.padEnd(3)} ${e.count} atoms`);
     });
+    if (winText(AN.res.it)) lines.push(winText(AN.res.it));
     if (!ps) lines.push("Set Time step (Trajectory panel) for the time axis and D.");
     else lines.push(`fit over ${r.elements[0] ? r.elements[0].fit.map(t => t.toPrecision(3)).join("–") : ""} ps (dashed); drift ${r.removeDrift ? "removed" : "kept"}`);
     return { panels: [{ series, ylabel: "MSD (Å²)", zero: true }], keys, xlabel: ps ? "*t* (ps)" : "lag (frames)", text: lines.join("\n"), xname: ps ? "t (ps)" : "lag (frames)" };
@@ -3033,26 +3073,31 @@ function anChart() {
     if (r.elements.length > 1) r.elements.forEach((e, i) => { const c = AN_COLORS[i % AN_COLORS.length]; if (key(e.el, e.el, c)) series.push({ label: e.el, x, y: Array.from(e.vdos, v => v * k), color: c }); });
     const f = v => (cm ? `${(v * THZ_TO_CM).toFixed(0)} cm⁻¹` : `${v.toPrecision(3)} THz`), top = (AN.fmax || vdosEnd(r)) * (cm ? THZ_TO_CM : 1);
     return { panels: [{ series, ylabel: cm ? "VDOS (1/cm⁻¹)" : "VDOS (1/THz)", zero: true }], keys, xlabel: cm ? "frequency (cm⁻¹)" : "frequency (THz)", xr: [0, top],
-      text: `${AN.res.assumed ? "Time step not set: 1 fs per frame assumed (frequencies scale as 1 / time step; set it in the Trajectory panel)\n" : ""}resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
+      text: `${AN.res.assumed ? "Time step not set: 1 fs per frame assumed (frequencies scale as 1 / time step; set it in the Trajectory panel)\n" : ""}resolution ${f(r.resolution_THz)}, up to ${f(r.nyquist_THz)} (Nyquist); from finite differences of positions${winText(AN.res.it) ? "\n" + winText(AN.res.it) : ""}`, xname: cm ? "frequency (cm-1)" : "frequency (THz)" };
   }
   // per frame: each chosen quantity in its own panel over a shared time axis; a, b, c share one panel
   const have = AN_Q.filter(q => r[q.k] && Array.from(r[q.k]).some(Number.isFinite));
   if (!have.some(q => AN.fq.has(q.k)) && have.length) AN.fq.add(have[0].k);
   const x = r.t ? Array.from(r.t) : Array.from({ length: r.n }, (_, i) => i + 1), panels = [], lines = [];
+  const [w0, w1] = anWin(AN.res.it), part = w0 > 0 || w1 < r.n - 1, inW = i => i >= w0 && i <= w1;
   let cell = null;
   for (const q of have) {
     const on = AN.fq.has(q.k);
     keys.push({ key: q.k, label: q.k, color: q.c, on });
     if (!on) continue;
-    const y = Array.from(r[q.k]), vals = y.filter(Number.isFinite), mean = vals.reduce((a, v) => a + v, 0) / vals.length;
+    const y = Array.from(r[q.k]), vals = y.filter((v, i) => inW(i) && Number.isFinite(v)), mean = vals.reduce((a, v) => a + v, 0) / vals.length;
     let sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, vals.length - 1));
     if (sd < 1e-9 * Math.abs(mean)) sd = 0; // a fixed cell: rounding only
     lines.push(`${q.k.padEnd(11)} mean ${fmt(mean)} ± ${fmt(sd)} ${q.u} over ${vals.length} frames`);
-    const s = { label: q.cell ? q.k : `${q.k} (${q.u})`, x, y, color: q.c };
-    if (q.cell) { if (!cell) panels.push(cell = { series: [], ylabel: "cell length (Å)" }); cell.series.push(s); }
-    else panels.push({ series: [s], ylabel: q.t });
+    // WHY: with a window the frames outside it are drawn in grey under the curve, so the cut (an equilibration
+    // stretch, say) stays visible; the dashed line is the mean over the window
+    const s = { label: q.cell ? q.k : `${q.k} (${q.u})`, x, y: part ? y.map((v, i) => (inW(i) ? v : NaN)) : y, color: q.c };
+    const ss = part ? [{ label: "", x, y, color: AN_TOTAL, width: 0.8 }, s, { label: "", x: [x[w0], x[w1]], y: [mean, mean], color: q.c, dash: true, width: 1 }] : [s];
+    if (q.cell) { if (!cell) panels.push(cell = { series: [], ylabel: "cell length (Å)" }); cell.series.push(...ss); }
+    else panels.push({ series: ss, ylabel: q.t });
   }
   if (!have.length) lines.push("Not available for this file.");
+  if (part) lines.push(winText(AN.res.it) + " (grey: outside it; dashed: the mean)");
   if (AN.fq.has("temperature") && have.some(q => q.k === "temperature")) {
     lines.push("temperature: from finite differences of saved positions, right only when every MD step (or every other) is saved");
     if (dtAssumed()) lines.push(`temperature: the time step is assumed (${DT0} fs per frame); type the real one, as T scales with 1/Δt²`);
@@ -3109,9 +3154,20 @@ window.addEventListener("resize", () => { if (!$("anwin").hidden && AN.res) draw
 $("an-big").addEventListener("click", () => { const on = !$("anwin").classList.contains("big"); $("anwin").classList.toggle("big", on); $("an-big").setAttribute("aria-pressed", String(on)); drawAnalysis(); });
 $("an-dt").addEventListener("change", () => {
   const it = mainTraj(); if (it) it.dtUser = anDt() || null;
-  syncDt(); saveSoon();
+  syncDt(); saveSoon(); anWinOpts();
   if (!$("anwin").hidden && AN.kind !== "rdf") runAnalysis();
 });
+$("an-win").addEventListener("change", e => {
+  const it = mainTraj(); if (!it || !it.traj) return;
+  const n = it.traj.n, cur = anWin(it), v0 = winParse($("an-w0").value), v1 = winParse($("an-w1").value);
+  let f0 = v0 ?? 0, f1 = v1 ?? n - 1;
+  f0 = Math.max(0, Math.min(n - 1, f0)); f1 = Math.max(0, Math.min(n - 1, f1));
+  if (f1 < f0) { if (e.target.id === "an-w0") f1 = f0; else f0 = f1; }
+  it.win = f0 === 0 && f1 === n - 1 ? null : [f0, f1];
+  saveSoon();
+  if (cur[0] !== f0 || cur[1] !== f1) runAnalysis(); else anWinOpts();
+});
+$("an-wall").addEventListener("click", () => { const it = mainTraj(); if (!it) return; it.win = null; saveSoon(); runAnalysis(); });
 $("an-opts").addEventListener("change", e => {
   const xi = { "an-t0": "t0", "an-t1": "t1", "an-fw": "fw", "an-lam": "lam" }[e.target.id];
   if (xi) {

@@ -121,7 +121,10 @@ hand it the files there, so nothing is uploaded; that window needs internet acce
   molecular dynamics (IBRION = 0: POTIM, in vasprun.xml and OUTCAR) and pw.x md output; other files do not store it,
   and the value typed is kept with the trajectory. Without one, 1 fs per frame is assumed and marked so: the VDOS
   frequencies scale as 1 / time step and the temperature estimate as 1 / time step²; MSD stays in frames until a
-  step is given. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
+  step is given. A window (from, to: in ps once the time step is known, else in frames) limits every analysis
+  and average to part of the trajectory, for example to leave out equilibration: RDF, MSD, VDOS and the XRD average
+  and map use only its frames; per frame, the whole series stays drawn with the part outside it in grey, and the
+  means and spreads, with a dashed mean line, are over the window. It is kept with the trajectory. Each curve has a chip below the chart that switches it off and on; per frame, the chips choose the
   quantities, drawn as panels over one time axis. Figures save as SVG or 600 dpi PNG, 3.5 in wide (one journal
   column), with only the curves shown, and the same curves as CSV; deleted atoms are left out. The window belongs to
   the scene: opening other files closes it.
